@@ -115,16 +115,6 @@ public class DriveScheme {
     //         .onFalse(Commands.runOnce(() -> drive.setWantedState(WantedState.TELEOP_DRIVE),
     // drive));
 
-    //     controller
-    //         .rightBumper()
-    //         .onTrue(
-    //             Commands.runOnce(() -> drive.setDriveToPointPose(new Pose2d(3, 3, new
-    // Rotation2d()))));
-    //     controller
-    //         .leftBumper()
-    //         .onFalse(
-    //             Commands.runOnce(() -> drive.setPathOntheFlyPose(new Pose2d(3, 3, new
-    // Rotation2d()))));
     //   }
 
     //   // setters for fast and slow mode

@@ -97,15 +97,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   // variable used to track rotation of the robot
   private Rotation2d rawGyroRotation = new Rotation2d();
 
-  // values used for pathfinding to pose
-  private Pose2d pathOntheFlyPose;
-  private PathConstraints pathConstraintsOnTheFly;
-  private double maxTransSpeedMpsOnTheFly = 20.0;
-  private double maxTransAccelMpssqOnTheFly = 30;
-  private double maxRotSpeedRadPerSecOnTheFly = 6;
-  private double maxRotAccelRadPerSecSqOnTheFly = 10;
-  private double idealEndVeloOntheFly = 0;
-
   // values to use during teleop, these will be periodically set during the default command
   private double xJoystickInput = 0.0;
   private double yJoystickInput = 0.0;
@@ -144,7 +135,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   private static final double goToPoseTranslationError = Units.inchesToMeters(1);
 
   // potential bad practice
-  // mainly used in path on the fly, nothing else uses command scheduler
   private boolean isRunningCommand =
       false; // exists in order to prevent the periodic state machine from calling the same command
   // multiple times
@@ -163,7 +153,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     AUTO,
     TELEOP_DRIVE,
     TELEOP_DRIVE_AT_ANGLE,
-    PATH_ON_THE_FLY,
     DRIVE_TO_POINT,
     IDLE
   }
@@ -174,7 +163,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     AUTO,
     TELEOP_DRIVE,
     TELEOP_DRIVE_AT_ANGLE,
-    PATH_ON_THE_FLY,
     DRIVE_TO_POINT,
     IDLE
   }
@@ -248,7 +236,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     // begin the odometry thread
     SparkOdometryThread.getInstance().start();
 
-    // create our autobuilder for pathfinder
     AutoBuilder.configure(
         this::getPose,
         this::setPose,
@@ -260,12 +247,9 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
         () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
         this);
 
-    setPathConstraintsOnTheFly();
     // make sure our angle controller wraps angles properly
     angleController.enableContinuousInput(-Math.PI, Math.PI);
 
-    // use our logged AD* algorithm as the pathfinder
-    Pathfinding.setPathfinder(new LocalADStarAK());
 
     // logging
     PathPlannerLogging.setLogActivePathCallback(
@@ -292,7 +276,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     Logger.recordOutput("testing/og", testPoseOG);
 
     setDriveToPointPose(new Pose2d(3, 3, new Rotation2d()));
-    setPathOntheFlyPose(new Pose2d(3, 3, new Rotation2d()));
   }
 
   @Override
@@ -373,8 +356,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     Logger.recordOutput("Subsystems/Drive/DesiredState", wantedState);
 
     /*
-     as long as isRunningCommand is true, PATH_ON_THE_FLY will not be able to be set as the system state, in order to avoid initializing the command multiple times
 
+    TODO: update the comment for this
      cancelIfNearAndReturnFalse checks 3 conditions, if the robot is at the desired pose, what the state is, and if we are in auto
 
      1. If the state is anything but DRIVE_TO_POINT or PATH_ON_THE_FLY, cancelIfNear will return false, allowing us to set PATH_ON_THE_FLY whenever we want.
@@ -398,7 +381,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     Robotstate.getInstance().updateBotPoseAndSpeeds(getPose(), getChassisSpeeds());
     Robotstate.getInstance().updateRawGyroVelo(gyroInputs.yawVelocityRadPerSec);
 
-    Logger.recordOutput("Subsystems/Drive/ pathOntheFlyGoal", pathOntheFlyPose);
     Logger.recordOutput("Subsystems/Drive/DriveDesiredPoint", driveToPointPose);
 
     Logger.recordOutput("Subsystems/Drive/ isRunningCommand", isRunningCommand);
@@ -419,11 +401,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     // fly)
     // wanted state stays PATH_ON_THE_FLY b/c despite the system state being set to something
     // different, the wanted state is never set to anything else until a condition
-    if (shouldCancelEarly.getAsBoolean() && wantedState == WantedState.PATH_ON_THE_FLY) {
-      setWantedState(WantedState.TELEOP_DRIVE);
-    }
 
-    if (wantedState != WantedState.DRIVE_TO_POINT && wantedState != WantedState.PATH_ON_THE_FLY) {
+    if (wantedState != WantedState.DRIVE_TO_POINT) {
       setEarlyCancel(true);
     }
 
@@ -432,7 +411,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
       case AUTO -> SystemState.AUTO;
       case TELEOP_DRIVE -> SystemState.TELEOP_DRIVE;
       case TELEOP_DRIVE_AT_ANGLE -> SystemState.TELEOP_DRIVE_AT_ANGLE;
-      case PATH_ON_THE_FLY -> SystemState.PATH_ON_THE_FLY;
       case DRIVE_TO_POINT -> SystemState.DRIVE_TO_POINT;
       default -> SystemState.IDLE;
     };
@@ -461,15 +439,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
         driveAtAngle(xJoystickInput, yJoystickInput, joystickDriveAtAngleAngle);
         // calculates speeds and angle
         // runs velocity
-        break;
-      case PATH_ON_THE_FLY:
-        // simply calls autobuilders built in command
-        // not the most accurate, should only be used for larger movements
-        // only run if not already running a path on the fly
-        setPathConstraintsOnTheFly();
-        if (!isRunningCommand) {
-          isRunningCommand = true;
-        }
         break;
       case DRIVE_TO_POINT:
         // calculates needed velo to get to state
@@ -771,16 +740,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     }
   }
 
-  public Command pathOnTheFlyCommand() {
-    return AutoBuilder.pathfindToPose(
-            pathOntheFlyPose, pathConstraintsOnTheFly, idealEndVeloOntheFly)
-        .until(shouldCancelEarly)
-        .finallyDo(() -> isRunningCommand = false); // make sure we clear the flag
-  }
-
   /**
-   * cancelIfNearAndReturnFalse checks 3 conditions, if the robot is at the desired pose, what the
-   * state is, and if we are in auto
+   TODO: update the comment and functionality of this
    *
    * <p>1. If the state is anything but DRIVE_TO_POINT or PATH_ON_THE_FLY, cancelIfNear will return
    * false, allowing us to set PATH_ON_THE_FLY whenever we want.
@@ -800,23 +761,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    *     pose
    */
   public boolean cancelIfNearAndReturnFalse() {
-    if ((systemState == SystemState.PATH_ON_THE_FLY && !DriverStation.isAutonomous())) {
-      // distance to desired pose
-      var distance = pathOntheFlyPose.getTranslation().minus(getPose().getTranslation()).getNorm();
-
-      // logging
-      Logger.recordOutput("Subsystems/Drive/PathOnFlyTeleOp/distanceFromEndpoint", distance);
-
-      // checks if at the pose, comparing 0 to our distance, because we want our distance to be 0
-      // increased allowance of error because path on the fly is less accurate than drive to point
-      if (MathUtil.isNear(0.0, distance, goToPoseTranslationError * 3)) {
-        setWantedState(
-            WantedState.TELEOP_DRIVE); // go back to teleop, will also resest early cancel
-        return false;
-      } else {
-        return true;
-      }
-    } else if ((systemState == SystemState.DRIVE_TO_POINT && !DriverStation.isAutonomous())) {
+ if ((systemState == SystemState.DRIVE_TO_POINT && !DriverStation.isAutonomous())) {
       // distance to desire pose
       var distance = driveToPointPose.getTranslation().minus(getPose().getTranslation()).getNorm();
 
@@ -844,9 +789,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
       } else {
         return true;
       }
-    } else if (systemState != SystemState.PATH_ON_THE_FLY) {
-      return false; // if we are not in PATH_ON_THE_FLY, then we must not be running a command for
-      // swerve drive
     } else {
       return true; // if all other conditions don't apply, then we are in the middle of a
       // pathfinding command, so return true
@@ -1110,16 +1052,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @param wantedState the desired state
    */
   public void setWantedState(WantedState wantedState) {
-
-    // reset the command canceller when setting the state to path on the fly and cancel the command
-    // when not
-    // important note: this should be called on all ways of ending PATH_ON_THE_FLY to ensure that
-    // the early cancel boolean is properly set
-    if (wantedState == WantedState.PATH_ON_THE_FLY) {
-      setEarlyCancel(false);
-    } else {
-      setEarlyCancel(true);
-    }
     this.wantedState = wantedState;
   }
 
@@ -1176,72 +1108,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   public void setDriveToPointPose(Pose2d pose) {
     driveToPointPose = pose;
   }
-
-  /**
-   * sets pose for path on the fly
-   *
-   * @param pose the desired pose to drive to
-   */
-  public void setPathOntheFlyPose(Pose2d pose) {
-    pathOntheFlyPose = pose;
-  }
-
-  /**
-   * sets the max xy speed during path on the fly
-   *
-   * @param speed the max speed in meters per second
-   */
-  public void setMaxTransSpeedOnTheFly(double speed) {
-    maxTransSpeedMpsOnTheFly = speed;
-  }
-
-  /**
-   * sets the max xy acceleration during path on the fly
-   *
-   * @param speed the max acceleration in meters per second^2
-   */
-  public void setMaxTransAccelOnTheFly(double speed) {
-    maxTransAccelMpssqOnTheFly = speed;
-  }
-
-  /**
-   * sets the max rotational speed during path on the fly
-   *
-   * @param speed the max speed in meters per second^2
-   */
-  public void setMaxRotSpeedOnTheFly(double speed) {
-    maxRotSpeedRadPerSecOnTheFly = speed;
-  }
-
-  /**
-   * sets the max rotational acceleration during path on the fly
-   *
-   * @param speed the max acceleration in radians per second^2
-   */
-  public void setMaxRotAccelOnTheFly(double speed) {
-    maxRotAccelRadPerSecSqOnTheFly = speed;
-  }
-
-  /**
-   * set the what speed we want to end path on the fly at generally 0 to stop at the end of the
-   * path, but could be higher to chain to another path/drive to point
-   *
-   * @param speed the desired speed in meters per second
-   */
-  public void setIdealEndVeloOntheFly(double speed) {
-    idealEndVeloOntheFly = speed;
-  }
-
-  /** sets the path constraints for path on the fly */
-  public void setPathConstraintsOnTheFly() {
-    pathConstraintsOnTheFly =
-        new PathConstraints(
-            maxTransSpeedMpsOnTheFly,
-            maxTransAccelMpssqOnTheFly,
-            maxRotSpeedRadPerSecOnTheFly,
-            maxRotAccelRadPerSecSqOnTheFly);
-  }
-
   /**
    * sets if the running command (currently just path on the fly) should end early or not
    *
