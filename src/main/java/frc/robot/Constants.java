@@ -25,6 +25,8 @@ import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Distance;
 import edu.wpi.first.wpilibj.RobotBase;
 import org.ironmaple.simulation.drivesims.COTS;
 import org.ironmaple.simulation.drivesims.configs.DriveTrainSimulationConfig;
@@ -227,5 +229,11 @@ public final class Constants {
                     Meters.of(wheelRadiusMeters),
                     KilogramSquareMeters.of(0.02),
                     wheelCOF));
+
+    public static final double AP_MAXACCEL_METERSPERSECSQUARED = 0;
+    public static final double AP_MAXJERK_METERSPERSECCUBED = 0;
+    public static final Distance AP_BEELINE_RADIUS = Meters.of(0.1);
+    public static final Distance AP_XY_ACCEPTED_ERROR = Meters.of(0.05);
+    public static final Angle AP_THETA_ACCEPTED_ERROR = Radians.of(0.1);
   }
 }

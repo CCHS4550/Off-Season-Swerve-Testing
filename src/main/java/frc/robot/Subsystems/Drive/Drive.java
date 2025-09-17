@@ -5,9 +5,12 @@ import static edu.wpi.first.units.Units.*;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
-import com.pathplanner.lib.path.PathConstraints;
-import com.pathplanner.lib.pathfinding.Pathfinding;
 import com.pathplanner.lib.util.PathPlannerLogging;
+import com.therekrab.autopilot.APConstraints;
+import com.therekrab.autopilot.APProfile;
+import com.therekrab.autopilot.APTarget;
+import com.therekrab.autopilot.Autopilot;
+import com.therekrab.autopilot.Autopilot.APResult;
 import edu.wpi.first.hal.FRCNetComm.tInstances;
 import edu.wpi.first.hal.FRCNetComm.tResourceType;
 import edu.wpi.first.hal.HAL;
@@ -45,7 +48,6 @@ import frc.robot.Subsystems.Drive.Gyro.GyroIOInputsAutoLogged;
 import frc.robot.Subsystems.Drive.Module.*;
 import frc.robot.Subsystems.Drive.Module.Module;
 import frc.robot.Subsystems.Vision.Vision;
-import frc.robot.Util.LocalADStarAK;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
@@ -109,6 +111,20 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   private double maxOptionalTurnVeloRadiansPerSec = Double.NaN;
   private double maxVelocityOutputForDriveToPoint = Units.feetToMeters(10.0);
 
+  private APConstraints autoPilotConstraints =
+      new APConstraints(
+          Constants.DriveConstants.AP_MAXACCEL_METERSPERSECSQUARED,
+          Constants.DriveConstants.AP_MAXJERK_METERSPERSECCUBED);
+  private APProfile autoPilotProfile =
+      new APProfile(autoPilotConstraints)
+          .withBeelineRadius(Constants.DriveConstants.AP_BEELINE_RADIUS)
+          .withErrorXY(Constants.DriveConstants.AP_XY_ACCEPTED_ERROR)
+          .withErrorTheta(Constants.DriveConstants.AP_THETA_ACCEPTED_ERROR);
+
+  private Autopilot autopilot = new Autopilot(autoPilotProfile);
+
+  private APTarget autoPilotTarget = new APTarget(testPose).withVelocity(0.0);
+
   /**
    * Pid Controller for drive at angle.
    *
@@ -135,13 +151,16 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   private static final double goToPoseTranslationError = Units.inchesToMeters(1);
 
   // potential bad practice
-  private boolean isRunningCommand =
-      false; // exists in order to prevent the periodic state machine from calling the same command
-  // multiple times
-  private BooleanSupplier shouldCancelEarly =
-      () ->
-          false; // we can enable should cancel early anytime we want to stop a command from running
-  // state we want drive train to be in
+  // this should only be used in sysID now
+  // commands should be initiated outside of the subsystem from now on, this variable just exists as
+  // a placeholder
+  private boolean isRunningCommand = false;
+
+  private boolean isAtDesiredPose = false;
+
+  // not thread safe
+  // use to exit external drive commands early and make the automate the transition back
+  private BooleanSupplier shouldCancelCommandEarly = () -> false;
 
   // used for drive simulation
   // wont be used unless for sim
@@ -154,6 +173,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     TELEOP_DRIVE,
     TELEOP_DRIVE_AT_ANGLE,
     DRIVE_TO_POINT,
+    AUTOPILOT,
+    EXTERNAL_COMMAND_CONTROL,
     IDLE
   }
 
@@ -164,6 +185,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     TELEOP_DRIVE,
     TELEOP_DRIVE_AT_ANGLE,
     DRIVE_TO_POINT,
+    AUTOPILOT,
+    EXTERNAL_COMMAND_CONTROL,
     IDLE
   }
 
@@ -249,7 +272,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
 
     // make sure our angle controller wraps angles properly
     angleController.enableContinuousInput(-Math.PI, Math.PI);
-
 
     // logging
     PathPlannerLogging.setLogActivePathCallback(
@@ -355,21 +377,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     Logger.recordOutput("Subsystems/Drive/SystemState", systemState);
     Logger.recordOutput("Subsystems/Drive/DesiredState", wantedState);
 
-    /*
-
-    TODO: update the comment for this
-     cancelIfNearAndReturnFalse checks 3 conditions, if the robot is at the desired pose, what the state is, and if we are in auto
-
-     1. If the state is anything but DRIVE_TO_POINT or PATH_ON_THE_FLY, cancelIfNear will return false, allowing us to set PATH_ON_THE_FLY whenever we want.
-
-     2. If the state is DRIVE_TO_POINT, the boolean is unimportant, as that state does not call the command scheduler, however it does automatically switch us back over
-        to either telop or auto when we are there. NOTE: the boolean value returned here can likely be used as the end condition if this this is called as a command in auto
-
-     3. If the state is PATH_ON_THE_FLY, when we are at our desired pose, the state is switched to teleop and the boolean is switched false, allowing us to finally call it again
-        If the pathfindToPose command is canceled early by the shouldCancelEarly boolean supplier, this will return false because the state is switched to teleop, which automatically returns false,
-        allowing us to then call the command again if we so wish
-    */
-    isRunningCommand = cancelIfNearAndReturnFalse();
+    // see method comment
+    isAtDesiredPose = cancelIfNearAndReturnTrue();
 
     // turn the states into desired output
     applyStates();
@@ -383,27 +392,37 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
 
     Logger.recordOutput("Subsystems/Drive/DriveDesiredPoint", driveToPointPose);
 
-    Logger.recordOutput("Subsystems/Drive/ isRunningCommand", isRunningCommand);
-    Logger.recordOutput("Subsystems/Drive/ early cancel", shouldCancelEarly.getAsBoolean());
+    Logger.recordOutput("Subsystems/Drive/ isAtDesiredPose", isAtDesiredPose);
+    Logger.recordOutput("Subsystems/Drive/ early cancel", shouldCancelCommandEarly.getAsBoolean());
   }
 
   /**
    * sets the system state to be the same as the wanted state, but can be set to perform more
    * complex judgements on what state to goto if so desired
    *
+   * <p>all command based judgements and drive commands. i.e path on the fly, sys id, named commands
+   * for auto run contrary to the philosophy of the periodic state machine and hence shall be
+   * wrapped in the EXTERNAL_COMMAND_CONTROL_STATE, where the drive state machine will not mess with
+   * their function
+   *
    * @return the systemstate that our systemState variable will be set to
    */
   private SystemState handleStateTransition() {
-    // if we cancel early, set the state to teleop to keep us from being stuck in an idle state and
-    // reset the boolean to true
-    // this should only apply if the wanted state is also PATH_ON_THE_FLY so we arent stuck in a
-    // cycle of setting to teleop b/c the boolean is true(which it always is when not in path on the
-    // fly)
-    // wanted state stays PATH_ON_THE_FLY b/c despite the system state being set to something
-    // different, the wanted state is never set to anything else until a condition
 
-    if (wantedState != WantedState.DRIVE_TO_POINT) {
-      setEarlyCancel(true);
+    // if we are not in a command control state, set the early cancel to true
+    if (wantedState != WantedState.EXTERNAL_COMMAND_CONTROL) {
+      setEarlyCommandCancel(true);
+    }
+
+    // switch states if the command ought to end early so we dont get stuck in the command control
+    // state
+    if (shouldCancelCommandEarly.getAsBoolean()
+        && wantedState == WantedState.EXTERNAL_COMMAND_CONTROL) {
+      if (DriverStation.isAutonomous()) {
+        setWantedState(WantedState.AUTO);
+      } else {
+        setWantedState(WantedState.TELEOP_DRIVE);
+      }
     }
 
     return switch (wantedState) {
@@ -412,6 +431,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
       case TELEOP_DRIVE -> SystemState.TELEOP_DRIVE;
       case TELEOP_DRIVE_AT_ANGLE -> SystemState.TELEOP_DRIVE_AT_ANGLE;
       case DRIVE_TO_POINT -> SystemState.DRIVE_TO_POINT;
+      case AUTOPILOT -> SystemState.AUTOPILOT;
+      case EXTERNAL_COMMAND_CONTROL -> SystemState.EXTERNAL_COMMAND_CONTROL;
       default -> SystemState.IDLE;
     };
   }
@@ -436,7 +457,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
         // runs velocity
         break;
       case TELEOP_DRIVE_AT_ANGLE:
-        driveAtAngle(xJoystickInput, yJoystickInput, joystickDriveAtAngleAngle);
+        joystickDriveAtAngle(xJoystickInput, yJoystickInput, joystickDriveAtAngleAngle);
         // calculates speeds and angle
         // runs velocity
         break;
@@ -445,6 +466,15 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
         // gives those speeds to driveAtAngle method which then calculates the rotational component
         // runs velocity
         driveToPoint();
+        break;
+      case AUTOPILOT:
+        // calculates the speeds necesary to reach the next autopilot setpoint
+        // hands that to drive at angle
+        // runs velocity
+        autoPilotDriveToPoint();
+        break;
+      case EXTERNAL_COMMAND_CONTROL:
+        // let the commands control drive
         break;
     }
   }
@@ -482,7 +512,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     // set all modules to our found states. Note that we still have to optomize our wheel angle for
     // better wraparound
     // set to 3 to ignore the broken swerve module? fix once fixed
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
       modules[i].runSwerveState(setPointStates[i]);
     }
 
@@ -578,10 +608,48 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
             speeds, isFlipped ? getRotation().plus(new Rotation2d(Math.PI)) : getRotation()));
   }
   /**
-   * sets the bot to drive at any given x & y input, but stays at a given angle can be called with
-   * joysticks providing the x and y speeds or an external pid loop note that when called with
-   * joysticks, an another overload shouldve been made to apply dead band everything should be field
-   * relative
+   * sets the bot to drive at any given x & y input, but stays at a given angle called with
+   * joysticks providing the x and y speeds
+   *
+   * <p>includes field relative flipping
+   *
+   * @param xInput horizontal speed of the bot
+   * @param yInput vertical speed of the bot
+   * @param angle desired angle to lock at
+   */
+  public void joystickDriveAtAngle(double xInput, double yInput, Rotation2d angle) {
+
+    System.out.println("running angle");
+    // convert the 2 seperate x & y inputs into an overall translation 2d of 1 linear speed, just
+    // found as the hypotenuse of the x & y
+    Translation2d linearVelocity =
+        getLinearVelocityFromXY(xInput, yInput, Constants.DriveConstants.deadband);
+
+    // calculate the angle with our profiled pid controller
+    double omega = angleController.calculate(getRotation().getRadians(), angle.getRadians());
+
+    Logger.recordOutput("Subsystems/Drive/ angle pid", omega);
+    Logger.recordOutput("Subsystems/Drive/ angle", angle);
+    // convert to field relative speeds
+    ChassisSpeeds speeds =
+        new ChassisSpeeds(
+            linearVelocity.getX() * getMaxLinearSpeed(),
+            linearVelocity.getY() * getMaxLinearSpeed(),
+            omega);
+    boolean isFlipped =
+        DriverStation.getAlliance().isPresent()
+            && DriverStation.getAlliance().get() == Alliance.Red;
+
+    // set the bot to run at the chassis speeds
+    runVelocity(
+        ChassisSpeeds.fromFieldRelativeSpeeds(
+            speeds, isFlipped ? getRotation().plus(new Rotation2d(Math.PI)) : getRotation()));
+  }
+  /**
+   * sets the bot to drive at any given x & y input, but stays at a given angle XY called with
+   * external control
+   *
+   * <p>no flipping because that seems to break in sim, am unsure how this will work on a real field
    *
    * @param xInput horizontal speed of the bot
    * @param yInput vertical speed of the bot
@@ -605,22 +673,18 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
             linearVelocity.getX() * getMaxLinearSpeed(),
             linearVelocity.getY() * getMaxLinearSpeed(),
             omega);
-    boolean isFlipped =
-        DriverStation.getAlliance().isPresent()
-            && DriverStation.getAlliance().get() == Alliance.Red;
 
     // set the bot to run at the chassis speeds
-    runVelocity(
-        ChassisSpeeds.fromFieldRelativeSpeeds(
-            speeds, isFlipped ? getRotation().plus(new Rotation2d(Math.PI)) : getRotation()));
+    runVelocity(ChassisSpeeds.fromFieldRelativeSpeeds(speeds, getRotation()));
   }
 
   /**
    * this is the same as the other drive at angle method, but with an inbuilt max turn speed sets
-   * the bot to drive at any given x & y input, but stays at a given angle can be called with
-   * joysticks providing the x and y speeds or an external pid loop note that when called with
-   * joysticks, an another overload shouldve been made to apply dead band everything should be field
-   * relative
+   * the bot to drive at any given x & y input, but stays at a given angle
+   *
+   * <p>the x and y speeds are set by external control
+   *
+   * <p>not alliance flipping because that seems to break the bot in sim
    *
    * @param xInput horizontal speed of the bot
    * @param yInput vertical speed of the bot
@@ -641,15 +705,10 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
             linearVelocity.getX() * getMaxLinearSpeed(),
             linearVelocity.getY() * getMaxLinearSpeed(),
             omega);
-    boolean isFlipped =
-        DriverStation.getAlliance().isPresent()
-            && DriverStation.getAlliance().get() == Alliance.Red;
 
     // set the bot to the chassis speeds, but use the turn limited method
     runVelocityWithMaxTurnVelo(
-        ChassisSpeeds.fromFieldRelativeSpeeds(
-            speeds, isFlipped ? getRotation().plus(new Rotation2d(Math.PI)) : getRotation()),
-        maxTurnVelo);
+        ChassisSpeeds.fromFieldRelativeSpeeds(speeds, getRotation()), maxTurnVelo);
   }
 
   /**
@@ -739,29 +798,28 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
           xComponent, yComponent, driveToPointPose.getRotation(), maxOptionalTurnVeloRadiansPerSec);
     }
   }
+  /**
+   * let autopilot handle the math for the curve and simply give the velocities and angle to
+   * driveAtAngle to apply to the bot
+   */
+  private void autoPilotDriveToPoint() {
+    APResult driveResult = autopilot.calculate(getPose(), getChassisSpeeds(), autoPilotTarget);
+    driveAtAngle(
+        driveResult.vx().magnitude(), driveResult.vy().magnitude(), driveResult.targetAngle());
+  }
 
   /**
-   TODO: update the comment and functionality of this
+   * TODO: update the comment and functionality of this
    *
-   * <p>1. If the state is anything but DRIVE_TO_POINT or PATH_ON_THE_FLY, cancelIfNear will return
-   * false, allowing us to set PATH_ON_THE_FLY whenever we want.
+   * <p>The boolean is largely unimportant for the drive subsystem, but can be used as an exit
+   * condition if calling these as autos is demanded If the state is either DRIVE_TO_POINT or
+   * AUTOPILOT then we will calculate if we have arrived. Otherwise we return false
    *
-   * <p>2. If the state is DRIVE_TO_POINT, the boolean is unimportant, as that state does not call
-   * the command scheduler, however it does automatically switch us back over to either telop or
-   * auto when we are there. NOTE: the boolean value returned here can likely be used as the end
-   * condition if this this is called as a command in auto
-   *
-   * <p>3. If the state is PATH_ON_THE_FLY, when we are at our desired pose, the state is switched
-   * to teleop and the boolean is switched false, allowing us to finally call it again If the
-   * pathfindToPose command is canceled early by the shouldCancelEarly boolean supplier, this will
-   * return false because the state is switched to teleop, which automatically returns false,
-   * allowing us to then call the command again if we so wish
-   *
-   * @return if we are in PATH_ON_THE_FLY or DRIVE_TO_POINT, and if we have gotten to the desired
+   * @return true if we are in AUTOPILOT or DRIVE_TO_POINT, and if we have gotten to the desired
    *     pose
    */
-  public boolean cancelIfNearAndReturnFalse() {
- if ((systemState == SystemState.DRIVE_TO_POINT && !DriverStation.isAutonomous())) {
+  public boolean cancelIfNearAndReturnTrue() {
+    if ((systemState == SystemState.DRIVE_TO_POINT && !DriverStation.isAutonomous())) {
       // distance to desire pose
       var distance = driveToPointPose.getTranslation().minus(getPose().getTranslation()).getNorm();
 
@@ -770,28 +828,54 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
 
       // checks if at pose, comparing 0 to our distance, because we want our distance to be 0
       if (MathUtil.isNear(0.0, distance, goToPoseTranslationError)) {
-        setWantedState(WantedState.TELEOP_DRIVE); // go back to teleop, will also reset early cancel
-        return false;
-      } else {
+        setWantedState(WantedState.TELEOP_DRIVE); // go back to teleop
         return true;
+      } else {
+        return false;
       }
     } else if ((systemState == SystemState.DRIVE_TO_POINT && DriverStation.isAutonomous())) {
+
+      // distance to desire pose
       var distance = driveToPointPose.getTranslation().minus(getPose().getTranslation()).getNorm();
 
+      // loging
       Logger.recordOutput("Subsystems/Drive/DriveToPointAuto/distanceFromEndpoint", distance);
 
+      // checks if at pose, comparing 0 to our distance, because we want our distance to be 0
       if (MathUtil.isNear(0.0, distance, goToPoseTranslationError)) {
-        setWantedState(
-            WantedState
-                .AUTO); // go back to auto so new tasks can be performed, will also reset early
-        // cancel
-        return false;
-      } else {
+        setWantedState(WantedState.AUTO); // go back to auto
         return true;
+      } else {
+        return false;
+      }
+    } else if (systemState == SystemState.AUTOPILOT && DriverStation.isAutonomous()) {
+      // logging
+      Logger.recordOutput(
+          "Subsystems/Drive/AutoPilotAuto/atEndPoint",
+          autopilot.atTarget(getPose(), autoPilotTarget));
+
+      // check if at pose
+      if (autopilot.atTarget(getPose(), autoPilotTarget)) {
+        setWantedState(WantedState.AUTO); // return to auto
+        return true;
+      } else {
+        return false;
+      }
+    } else if (systemState == SystemState.AUTOPILOT && !DriverStation.isAutonomous()) {
+      Logger.recordOutput(
+          "Subsystems/Drive/AutoPilotTeleop/atEndPoint",
+          autopilot.atTarget(getPose(), autoPilotTarget));
+
+      // check if at pose
+      if (autopilot.atTarget(getPose(), autoPilotTarget)) {
+        setWantedState(WantedState.TELEOP_DRIVE); // return to teleop
+        return true;
+      } else {
+        return false;
       }
     } else {
-      return true; // if all other conditions don't apply, then we are in the middle of a
-      // pathfinding command, so return true
+      return false; // if all other conditions don't apply, then we are not seeking a state based
+      // pose
     }
   }
 
@@ -1052,6 +1136,11 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @param wantedState the desired state
    */
   public void setWantedState(WantedState wantedState) {
+    // once we entire a command based state, reset the early cancel variable
+    if (wantedState == WantedState.EXTERNAL_COMMAND_CONTROL) {
+      setEarlyCommandCancel(false);
+    }
+
     this.wantedState = wantedState;
   }
 
@@ -1108,13 +1197,120 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   public void setDriveToPointPose(Pose2d pose) {
     driveToPointPose = pose;
   }
+
+  /**
+   * sets all required parameters for autopilot parameters that are not desired to be defined can be
+   * set to null and they will not be called
+   *
+   * <p>It is defined this way instead of with multiple setters to help avoid possible excess
+   * verbosity when changing the target
+   *
+   * <p>even though calling the method should be simpler, the method itself is a little chunky,
+   * parts of this should still be extracted into their own methods
+   *
+   * <p>TODO: extract the entry angle and rotation logic into their own helper methods to improve
+   * readibility
+   *
+   * @param pose the desired pose to drive to in autopilot. If null we will use the previously
+   *     defined pose or default orgin 0,0 if never defined
+   * @param withEntryAngle if we want an entry angle. If true then we should have defined entry
+   *     angle at some point. If false then we will beeline to pose. If null then we will keep using
+   *     the current state of entry
+   * @param entryAngle the angle to enter the pose from. If null we continue using the previous
+   *     entry angle. If prev val is not defined then it will act as if withEntryAngle == false
+   * @param endVelocity the velocity in meters/s that we would like to end at. If null we will use
+   *     the previously defined velo or 0 if never defined
+   * @param withRotationRadius if we want a rotation radius. If true then we should have defined
+   *     rotation radius at some point. If false we begin rotating asap. If null then we will keep
+   *     whatever has been set before
+   * @param rotationRadiusMeters how long until we start spinning toward the desired end rotation in
+   *     meters. If null we continue using the previous rotation distance. If prev val is not
+   *     defined then it will act as if withRotationRadius == false
+   */
+  public void setAutoPilotTarget(
+      Pose2d pose,
+      Boolean withEntryAngle,
+      Rotation2d entryAngle,
+      Double endVelocity,
+      Boolean withRotationRadius,
+      Double rotationRadiusMeters) { // withEntryAngle is called as an object Boolean rather than a
+    // boolean to allow null values to exist. Primitive booleans
+    // should still be able to be passed in so there should be no
+    // effect outside of the method. Same thing with endVelocity, withRotationRadius, and
+    // rotationRadiusMeters
+
+    // if we want a new pose, then set it
+    if (pose != null) {
+      autoPilotTarget = autoPilotTarget.withReference(pose);
+    }
+
+    // if entry angle is null, then we keep whatever entry constants had been set earlier
+    if (withEntryAngle != null && withEntryAngle) {
+      // we know that we want an entry angle, but check to make sure that we want to set a new one
+      // or keep the old one
+      if (entryAngle != null) {
+        autoPilotTarget = autoPilotTarget.withEntryAngle(entryAngle);
+      }
+      // print if we want an entry angle but the entry angle is never defined. This wont necessarily
+      // break the autopilot, but it does mean entry behavior wont work
+      if (entryAngle == null && autoPilotTarget.getEntryAngle().isEmpty()) {
+        System.err.println("autopilot target has entry angle, but the angle is never defined");
+      }
+    }
+    // if we dont want an entry angle than remove that from the target
+    if (withEntryAngle != null && !withEntryAngle) {
+      autoPilotTarget = autoPilotTarget.withoutEntryAngle();
+    }
+
+    // if we want a new end velocity, then we define it
+    if (endVelocity != null) {
+      autoPilotTarget = autoPilotTarget.withVelocity(endVelocity);
+    }
+
+    // if rotationRadius is null, then we keep whatever constants had been set earlier
+    if (withRotationRadius != null && withRotationRadius) {
+      // we know that we want a rotation radius, but check to make sure that we want to set a new
+      // one
+      // or keep the old one
+      if (rotationRadiusMeters != null) {
+        autoPilotTarget = autoPilotTarget.withRotationRadius(Meters.of(rotationRadiusMeters));
+      }
+      // print if we want a rotation radius but the radius is never defined. This wont necessarily
+      // break the autopilot, but it does mean that we will rotate immidietely
+      if (rotationRadiusMeters == null && autoPilotTarget.getRotationRadius().isEmpty()) {
+        System.err.println("autopilot target has rotation radius, but the radius is never defined");
+      }
+    }
+    // if we dont want a rotation radius than remove that from the target
+    if (withRotationRadius != null && !withRotationRadius) {
+
+      // we use this incredibly clunky method to create a copy of our target without the radius
+      // because there is no withOutRotationRadius method in APTarget
+      APTarget copy = new APTarget(autoPilotTarget.getReference());
+      copy.withVelocity(autoPilotTarget.getVelocity());
+      if (autoPilotTarget.getEntryAngle().isPresent()) {
+        copy.withEntryAngle(autoPilotTarget.getEntryAngle().get());
+      }
+
+      autoPilotTarget = copy;
+    }
+  }
+  /**
+   * sets the autopilot target to match a preconfigured APTarget
+   *
+   * @param autoPiloTarget the target to set to
+   */
+  public void setAutoPilotTarget(APTarget autoPilotTarget) {
+    this.autoPilotTarget = autoPilotTarget;
+  }
+
   /**
    * sets if the running command (currently just path on the fly) should end early or not
    *
    * @param should if the command should end early, true is to end
    */
-  public void setEarlyCancel(boolean should) {
-    shouldCancelEarly = () -> should;
+  public void setEarlyCommandCancel(boolean should) {
+    shouldCancelCommandEarly = () -> should;
   }
 
   /** Adds a new timestamped vision measurement. */
