@@ -35,7 +35,8 @@ public interface VisionIO {
   enum PoseObservationType {
     MEGATAG_1,
     MEGATAG_2,
-    PHOTONVISION // The only kind we care about
+    PHOTONVISION, // important
+    QUESTNAV // important
   }
 
   /** Updates the set of loggable inputs. */
