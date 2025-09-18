@@ -1,2 +1,2 @@
 # Off-Season-Swerve-Testing
-improve odometry readings and on field pid control with our chassis bot
+improve odometry readings, on field pid control, and vision maybe with our chassis bot
