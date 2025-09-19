@@ -53,7 +53,7 @@ public final class Constants {
   }
 
   public static final class VisionConstants {
-    public static final class PhotonVisionConstants{
+    // public static final class PhotonVisionConstants{
       public static AprilTagFieldLayout aprilTagLayout =
           AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField);
 
@@ -86,15 +86,15 @@ public final class Constants {
       public static Transform3d robotToCamera1 =
           new Transform3d(
               -0.2, 0.0, 0.2, new Rotation3d(0.0, -0.4, Math.PI)); // fill with actual camera offsets
-      }
+      // }
 
-      public static final class QuestNavConstants {
-        public static final Transform3d robotToCamera = new Transform3d (0.0, 0.0, 0.0, new Rotation3d(69,69,69)); // add actual offsets
+      // public static final class QuestNavConstants {
+      //   public static final Transform3d robotToCamera = new Transform3d (0.0, 0.0, 0.0, new Rotation3d(69,69,69)); // add actual offsets
 
-        // placeholder filtering
-        public static double maxAmbiguity = 0.67;
-        public static double mazZError = 67;
-      }
+      //   // placeholder filtering
+      //   public static double maxAmbiguity = 0.67;
+      //   public static double mazZError = 67;
+      // }
 
   }
 
