@@ -54,47 +54,48 @@ public final class Constants {
 
   public static final class VisionConstants {
     // public static final class PhotonVisionConstants{
-      public static AprilTagFieldLayout aprilTagLayout =
-          AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField);
+    public static AprilTagFieldLayout aprilTagLayout =
+        AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField);
 
-      public static double maxAmbiguity = 0.3; // placeholder
-      public static double maxZError = 0.75; // placeholder
+    public static double maxAmbiguity = 0.3; // placeholder
+    public static double maxZError = 0.75; // placeholder
 
-      public static int frontCameraCanID;
+    public static int frontCameraCanID;
 
-      public static double linearStdDevBaseline = 0.02;
-      public static double angularStdDevBaseline = 0.06;
-      public static double linearStdDevMegatag2Factor = 0.5;
-      public static double angularStdDevMegatag2Factor = Double.POSITIVE_INFINITY;
+    public static double linearStdDevBaseline = 0.02;
+    public static double angularStdDevBaseline = 0.06;
+    public static double linearStdDevMegatag2Factor = 0.5;
+    public static double angularStdDevMegatag2Factor = Double.POSITIVE_INFINITY;
 
-      // Standard deviation multipliers for each camera
-      // (Adjust to trust some cameras more than others)
-      public static double[] cameraStdDevFactors =
-          new double[] {
-            1.0, // Camera 0
-            1.0 // Camera 1
-          };
+    // Standard deviation multipliers for each camera
+    // (Adjust to trust some cameras more than others)
+    public static double[] cameraStdDevFactors =
+        new double[] {
+          1.0, // Camera 0
+          1.0 // Camera 1
+        };
 
-      // Camera names, must match names configured on coprocessor
-      public static String camera0Name = "camera_0";
-      public static String camera1Name = "camera_1";
+    // Camera names, must match names configured on coprocessor
+    public static String camera0Name = "camera_0";
+    public static String camera1Name = "camera_1";
 
-      // Robot to camera transforms
-      // (Not used by Limelight, configure in web UI instead)
-      public static Transform3d robotToCamera0 =
-          new Transform3d(0.2, 0.0, 0.2, new Rotation3d(0.0, -0.4, 0.0));
-      public static Transform3d robotToCamera1 =
-          new Transform3d(
-              -0.2, 0.0, 0.2, new Rotation3d(0.0, -0.4, Math.PI)); // fill with actual camera offsets
-      // }
+    // Robot to camera transforms
+    // (Not used by Limelight, configure in web UI instead)
+    public static Transform3d robotToCamera0 =
+        new Transform3d(0.2, 0.0, 0.2, new Rotation3d(0.0, -0.4, 0.0));
+    public static Transform3d robotToCamera1 =
+        new Transform3d(
+            -0.2, 0.0, 0.2, new Rotation3d(0.0, -0.4, Math.PI)); // fill with actual camera offsets
+    // }
 
-      // public static final class QuestNavConstants {
-      //   public static final Transform3d robotToCamera = new Transform3d (0.0, 0.0, 0.0, new Rotation3d(69,69,69)); // add actual offsets
+    // public static final class QuestNavConstants {
+    //   public static final Transform3d robotToCamera = new Transform3d (0.0, 0.0, 0.0, new
+    // Rotation3d(69,69,69)); // add actual offsets
 
-      //   // placeholder filtering
-      //   public static double maxAmbiguity = 0.67;
-      //   public static double mazZError = 67;
-      // }
+    //   // placeholder filtering
+    //   public static double maxAmbiguity = 0.67;
+    //   public static double mazZError = 67;
+    // }
 
   }
 

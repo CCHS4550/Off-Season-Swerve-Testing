@@ -5,6 +5,8 @@ import static edu.wpi.first.units.Units.*;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
+import com.pathplanner.lib.path.PathConstraints;
+import com.pathplanner.lib.pathfinding.Pathfinding;
 import com.pathplanner.lib.util.PathPlannerLogging;
 import com.therekrab.autopilot.APConstraints;
 import com.therekrab.autopilot.APProfile;
@@ -38,7 +40,9 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import edu.wpi.first.wpilibj2.command.button.Trigger;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.Constants;
 import frc.robot.Constants.Mode;
@@ -48,6 +52,8 @@ import frc.robot.Subsystems.Drive.Gyro.GyroIOInputsAutoLogged;
 import frc.robot.Subsystems.Drive.Module.*;
 import frc.robot.Subsystems.Drive.Module.Module;
 import frc.robot.Subsystems.Vision.Vision;
+import frc.robot.Util.LocalADStarAK;
+import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
@@ -125,6 +131,15 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
 
   private APTarget autoPilotTarget = new APTarget(testPose).withVelocity(0.0);
 
+  // values used for pathfinding to pose
+  private Pose2d pathOntheFlyPose;
+  private PathConstraints pathConstraintsOnTheFly;
+  private double maxTransSpeedMpsOnTheFly = 20.0;
+  private double maxTransAccelMpssqOnTheFly = 30;
+  private double maxRotSpeedRadPerSecOnTheFly = 6;
+  private double maxRotAccelRadPerSecSqOnTheFly = 10;
+  private double idealEndVeloOntheFly = 0;
+
   /**
    * Pid Controller for drive at angle.
    *
@@ -147,19 +162,19 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   private final PIDController teleopDriveToPointController = new PIDController(0.69, 0, 0.1);
   private Pose2d driveToPointPose = new Pose2d(); // pose to drive to
 
-  // acceptable margin of error when going to a posse
+  // acceptable margin of error when going to a pose in drive to point
   private static final double goToPoseTranslationError = Units.inchesToMeters(1);
+  // acceptable margin of error when going to a pose in path on the fly, larger b/c path on the fly
+  // is meant for larger overall translations in this context and is less precise overall
+  private static final double pathOntheFlyTranslationError = Units.inchesToMeters(4);
 
   // potential bad practice
-  // this should only be used in sysID now
-  // commands should be initiated outside of the subsystem from now on, this variable just exists as
-  // a placeholder
-  private boolean isRunningCommand = false;
+  private BooleanSupplier shouldExecuteCommand = () -> false;
+  public final Trigger executeCommand = new Trigger(shouldExecuteCommand);
 
   private boolean isAtDesiredPose = false;
 
-  // not thread safe
-  // use to exit external drive commands early and make the automate the transition back
+  // use to exit  drive commands early and make the automate the transition back
   private BooleanSupplier shouldCancelCommandEarly = () -> false;
 
   // used for drive simulation
@@ -167,26 +182,26 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   @SuppressWarnings("unused")
   private final Consumer<Pose2d> resetSimulationPoseCallBack;
 
-  public enum WantedState {
-    SYS_ID,
+  private enum WantedState {
+    SYS_ID, // COMMAND CONTROL
     AUTO,
     TELEOP_DRIVE,
     TELEOP_DRIVE_AT_ANGLE,
     DRIVE_TO_POINT,
     AUTOPILOT,
-    EXTERNAL_COMMAND_CONTROL,
+    PATH_ON_THE_FLY, // COMMAND CONTROL
     IDLE
   }
 
   // state the drive train is in
-  public enum SystemState {
-    SYS_ID,
+  private enum SystemState {
+    SYS_ID, // COMMAND CONTROL
     AUTO,
     TELEOP_DRIVE,
     TELEOP_DRIVE_AT_ANGLE,
     DRIVE_TO_POINT,
     AUTOPILOT,
-    EXTERNAL_COMMAND_CONTROL,
+    PATH_ON_THE_FLY, // COMMAND CONTROL
     IDLE
   }
 
@@ -194,7 +209,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   // note that sysID might also be used as a stand alone command, in which case we would have to
   // apply the isRunningCommand boolean
   // as of now not a concern as we will not be runnign sysID
-  public enum SysIdtoRun {
+  private enum SysIdtoRun {
     NONE,
     DRIVE_Wheel_Radius_Characterization,
     FEED_FORWARD_Calibration,
@@ -204,10 +219,17 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     DYNAMIC_REVERSE
   }
 
+  private enum CommandtoRun {
+    NONE,
+    SYS_ID,
+    PATH_ON_THE_FLY
+  }
+
   // initialize our states
   private SystemState systemState = SystemState.TELEOP_DRIVE;
   private WantedState wantedState = WantedState.TELEOP_DRIVE;
   private SysIdtoRun sysIdtoRun = SysIdtoRun.NONE;
+  private CommandtoRun commandtoRun = CommandtoRun.NONE;
 
   // array of our previous module positions
   private SwerveModulePosition[] lastModulePos =
@@ -270,8 +292,25 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
         () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
         this);
 
+    setPathConstraintsOnTheFly();
     // make sure our angle controller wraps angles properly
     angleController.enableContinuousInput(-Math.PI, Math.PI);
+
+    // use our logged AD* algorithm as the pathfinder
+    Pathfinding.setPathfinder(new LocalADStarAK());
+
+    /*  behavior of our drive command scheduler is dictated here
+     *  the onTrue and onFalse notation means that on any given switch between states, the behavior is performed,
+     *  meaning that any given command can only be called once a time even when periodically dealing setting these variables,
+     *  as it only schedules on a CHANGE in value.
+     *
+     *  <p> the onTrue references an enum, meaning that we MUST ensure that the correct command is chosen for that given instance or it will not function properly.
+     *  This allows us to make sure all the commands stay working around one central scheduler
+     *
+     *  <p> note that because triggers are periodically checked by the command scheduler, we should be able to simply set these conditions here and allow the command scheduler to do the rest for us
+     */
+    executeCommand.onTrue(runCommandControl());
+    executeCommand.onFalse(halt());
 
     // logging
     PathPlannerLogging.setLogActivePathCallback(
@@ -320,7 +359,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
       for (var module : modules) {
         module.stop();
       }
-      halt();
+      shouldExecuteCommand = () -> false;
       Logger.recordOutput("SwerveStates/Setpoints", new SwerveModuleState[] {});
       Logger.recordOutput("SwerveStates/SetpointsOptimized", new SwerveModuleState[] {});
     }
@@ -400,24 +439,21 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * sets the system state to be the same as the wanted state, but can be set to perform more
    * complex judgements on what state to goto if so desired
    *
-   * <p>all command based judgements and drive commands. i.e path on the fly, sys id, named commands
-   * for auto run contrary to the philosophy of the periodic state machine and hence shall be
-   * wrapped in the EXTERNAL_COMMAND_CONTROL_STATE, where the drive state machine will not mess with
-   * their function
-   *
    * @return the systemstate that our systemState variable will be set to
    */
   private SystemState handleStateTransition() {
 
     // if we are not in a command control state, set the early cancel to true
-    if (wantedState != WantedState.EXTERNAL_COMMAND_CONTROL) {
+    // and reset the command trigger to false to be ready for a new command to be scheduled
+    if (wantedState != WantedState.PATH_ON_THE_FLY && wantedState != WantedState.SYS_ID) {
       setEarlyCommandCancel(true);
+      shouldExecuteCommand = () -> false;
     }
 
     // switch states if the command ought to end early so we dont get stuck in the command control
     // state
     if (shouldCancelCommandEarly.getAsBoolean()
-        && wantedState == WantedState.EXTERNAL_COMMAND_CONTROL) {
+        && (wantedState == WantedState.PATH_ON_THE_FLY || wantedState == WantedState.SYS_ID)) {
       if (DriverStation.isAutonomous()) {
         setWantedState(WantedState.AUTO);
       } else {
@@ -432,7 +468,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
       case TELEOP_DRIVE_AT_ANGLE -> SystemState.TELEOP_DRIVE_AT_ANGLE;
       case DRIVE_TO_POINT -> SystemState.DRIVE_TO_POINT;
       case AUTOPILOT -> SystemState.AUTOPILOT;
-      case EXTERNAL_COMMAND_CONTROL -> SystemState.EXTERNAL_COMMAND_CONTROL;
+      case PATH_ON_THE_FLY -> SystemState.PATH_ON_THE_FLY;
       default -> SystemState.IDLE;
     };
   }
@@ -442,7 +478,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     switch (systemState) {
       default:
       case SYS_ID:
-        runSysID();
+        commandtoRun = CommandtoRun.SYS_ID;
+        shouldExecuteCommand = () -> true;
         break;
       case AUTO: // AUTO just automatically breaks because it is made of a completely planned set of
         // commands to follow that don't require a periodic state system
@@ -473,8 +510,10 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
         // runs velocity
         autoPilotDriveToPoint();
         break;
-      case EXTERNAL_COMMAND_CONTROL:
-        // let the commands control drive
+      case PATH_ON_THE_FLY:
+        setPathConstraintsOnTheFly();
+        commandtoRun = CommandtoRun.PATH_ON_THE_FLY;
+        shouldExecuteCommand = () -> true;
         break;
     }
   }
@@ -486,7 +525,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @param speeds the desired chassis speeds, in XY units of meters per second and omega units of
    *     radians per second
    */
-  public void runVelocity(ChassisSpeeds speeds) {
+  private void runVelocity(ChassisSpeeds speeds) {
 
     // calculate and optomize our given speeds
     ChassisSpeeds discreteSpeeds =
@@ -655,7 +694,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @param yInput vertical speed of the bot
    * @param angle desired angle to lock at
    */
-  public void driveAtAngle(double xInput, double yInput, Rotation2d angle) {
+  private void driveAtAngle(double xInput, double yInput, Rotation2d angle) {
 
     System.out.println("running angle");
     // convert the 2 seperate x & y inputs into an overall translation 2d of 1 linear speed, just
@@ -691,7 +730,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @param angle desired angle to lock at
    * @param maxTurnVelo the max omega speed of the bot, in radians per second
    */
-  public void driveAtAngle(double xInput, double yInput, Rotation2d angle, double maxTurnVelo) {
+  private void driveAtAngle(double xInput, double yInput, Rotation2d angle, double maxTurnVelo) {
     // convert the 2 seperate x & y inputs into an overall translation 2d of 1 linear speed, just
     // found as the hypotenuse of the x & y
     Translation2d linearVelocity = getLinearVelocityFromXY(xInput, yInput);
@@ -715,7 +754,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * This sets the bot to drive straight to a desired pose It does this by calculating our needed
    * velocities to get there, then applying that to drive at angle
    */
-  public void driveToPoint() {
+  private void driveToPoint() {
 
     // difference between our desired pose and our current one
     var translationToDesiredPoint =
@@ -809,16 +848,32 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   }
 
   /**
-   * TODO: update the comment and functionality of this
+   * Factory method for the command we use to create path on the flys to points. Note that we defer
+   * the command to have it construct at runtime, allowing the conditions to take effect
    *
-   * <p>The boolean is largely unimportant for the drive subsystem, but can be used as an exit
-   * condition if calling these as autos is demanded If the state is either DRIVE_TO_POINT or
-   * AUTOPILOT then we will calculate if we have arrived. Otherwise we return false
-   *
-   * @return true if we are in AUTOPILOT or DRIVE_TO_POINT, and if we have gotten to the desired
-   *     pose
+   * @return the command to goto any given point while avoiding obstacles
    */
-  public boolean cancelIfNearAndReturnTrue() {
+  private Command pathOnTheFlyCommand() {
+    return Commands.defer(
+        () ->
+            AutoBuilder.pathfindToPose(
+                    pathOntheFlyPose, pathConstraintsOnTheFly, idealEndVeloOntheFly)
+                .until(shouldCancelCommandEarly)
+                .finallyDo(() -> shouldExecuteCommand = () -> false),
+        Set.of(this));
+  }
+
+  /**
+   * The boolean is largely unimportant for the drive subsystem, but can be used as an exit
+   * condition if calling these as autos is demanded
+   *
+   * <p>If the state is either DRIVE_TO_POINT or AUTOPILOT or PATH_ON_THE_FLY then we will calculate
+   * if we have arrived. Otherwise we return false
+   *
+   * @return true if we are in AUTOPILOT or DRIVE_TO_POINT or PATH_ON_THE_FLY, and if we have gotten
+   *     to the desired pose
+   */
+  private boolean cancelIfNearAndReturnTrue() {
     if ((systemState == SystemState.DRIVE_TO_POINT && !DriverStation.isAutonomous())) {
       // distance to desire pose
       var distance = driveToPointPose.getTranslation().minus(getPose().getTranslation()).getNorm();
@@ -873,6 +928,41 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
       } else {
         return false;
       }
+    }
+
+    if ((systemState == SystemState.PATH_ON_THE_FLY && !DriverStation.isAutonomous())) {
+      // distance to desire pose
+      var distance = pathOntheFlyPose.getTranslation().minus(getPose().getTranslation()).getNorm();
+
+      // logging
+      Logger.recordOutput("Subsystems/Drive/PathOnTheFlyTeleOp/distanceFromEndpoint", distance);
+
+      // checks if at pose, comparing 0 to our distance, because we want our distance to be 0
+      if (MathUtil.isNear(0.0, distance, pathOntheFlyTranslationError)) {
+        setWantedState(WantedState.TELEOP_DRIVE); // go back to teleop
+        shouldCancelCommandEarly = () -> true;
+        shouldExecuteCommand = () -> false;
+        return true;
+      } else {
+        return false;
+      }
+    } else if ((systemState == SystemState.PATH_ON_THE_FLY && DriverStation.isAutonomous())) {
+
+      // distance to desire pose
+      var distance = pathOntheFlyPose.getTranslation().minus(getPose().getTranslation()).getNorm();
+
+      // loging
+      Logger.recordOutput("Subsystems/Drive/PathOnTheFlyAuto/distanceFromEndpoint", distance);
+
+      // checks if at pose, comparing 0 to our distance, because we want our distance to be 0
+      if (MathUtil.isNear(0.0, distance, pathOntheFlyTranslationError)) {
+        setWantedState(WantedState.AUTO); // go back to auto
+        shouldCancelCommandEarly = () -> true;
+        shouldExecuteCommand = () -> false;
+        return true;
+      } else {
+        return false;
+      }
     } else {
       return false; // if all other conditions don't apply, then we are not seeking a state based
       // pose
@@ -880,31 +970,26 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   }
 
   // this exists just to prevent too many states or apply states from being crowded
-  public void runSysID() {
-    switch (sysIdtoRun) {
-      default:
-        break;
-      case NONE:
-        break;
+  private Command runSysID() {
+    return switch (sysIdtoRun) {
+      case NONE -> new InstantCommand(() -> {}, this);
         // TODO: write a command for this
-      case DRIVE_Wheel_Radius_Characterization:
-        break;
+      case DRIVE_Wheel_Radius_Characterization -> new InstantCommand(() -> {}, this);
         // TODO: write a command for this too
-      case FEED_FORWARD_Calibration:
-        break;
-      case QUASISTATIC_FORWARD:
-        sysIdQuasistatic(SysIdRoutine.Direction.kForward);
-        break;
-      case QUASISTATIC_REVERSE:
-        sysIdQuasistatic(SysIdRoutine.Direction.kReverse);
-        break;
-      case DYNAMIC_FORWARD:
-        sysIdDynamic(SysIdRoutine.Direction.kForward);
-        break;
-      case DYNAMIC_REVERSE:
-        sysIdDynamic(SysIdRoutine.Direction.kReverse);
-        break;
-    }
+      case FEED_FORWARD_Calibration -> new InstantCommand(() -> {}, this);
+      case QUASISTATIC_FORWARD -> sysIdQuasistatic(SysIdRoutine.Direction.kForward);
+      case QUASISTATIC_REVERSE -> sysIdQuasistatic(SysIdRoutine.Direction.kReverse);
+      case DYNAMIC_FORWARD -> sysIdDynamic(SysIdRoutine.Direction.kForward);
+      case DYNAMIC_REVERSE -> sysIdDynamic(SysIdRoutine.Direction.kReverse);
+    };
+  }
+
+  private Command runCommandControl() {
+    return switch (commandtoRun) {
+      case NONE -> new InstantCommand(() -> {}, this);
+      case SYS_ID -> runSysID();
+      case PATH_ON_THE_FLY -> pathOnTheFlyCommand();
+    };
   }
   /**
    * converts a set of x and y speeds into a singular linear velocity - should be field oriented
@@ -961,21 +1046,21 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    *
    * @param output the desired output
    */
-  public void runCharacterization(Double output) {
+  private void runCharacterization(Double output) {
     for (int i = 0; i < 4; i++) {
       modules[i].runCharacterization(output);
     }
   }
 
   /** stops the bot */
-  public void stop() {
+  private void stop() {
     runVelocity(new ChassisSpeeds());
   }
 
   /**
    * @return a null command to clear the command scheduler and halt any running commands
    */
-  public Command halt() {
+  private Command halt() {
     return Commands.runOnce(() -> {}, this);
   }
 
@@ -1000,7 +1085,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @param direction whether to test this forward or reverse
    * @return a command to perform the desired sysID test
    */
-  public Command sysIdQuasistatic(SysIdRoutine.Direction direction) {
+  private Command sysIdQuasistatic(SysIdRoutine.Direction direction) {
     return run(() -> runCharacterization(0.0))
         .withTimeout(1.0)
         .andThen(sysId.quasistatic(direction));
@@ -1012,7 +1097,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @param direction whether to perform this forward or reverse
    * @return a command to perform the desired sysID test
    */
-  public Command sysIdDynamic(SysIdRoutine.Direction direction) {
+  private Command sysIdDynamic(SysIdRoutine.Direction direction) {
     return run(() -> runCharacterization(0.0)).withTimeout(1.0).andThen(sysId.dynamic(direction));
   }
 
@@ -1022,7 +1107,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @return an array of all 4 swerve module states
    */
   @AutoLogOutput(key = "SwerveStates/measured")
-  private SwerveModuleState[] getModuleStates() {
+  public SwerveModuleState[] getModuleStates() {
     SwerveModuleState[] states = new SwerveModuleState[4];
     for (int i = 0; i < 4; i++) {
       states[i] = modules[i].getState();
@@ -1036,7 +1121,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    *
    * @return an array of all 4 swerve module positon
    */
-  private SwerveModulePosition[] getModulePositions() {
+  public SwerveModulePosition[] getModulePositions() {
     SwerveModulePosition[] states = new SwerveModulePosition[4];
     for (int i = 0; i < 4; i++) {
       states[i] = modules[i].getPosition();
@@ -1050,7 +1135,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @return a chassisSpeeds containing our bots speed and direction
    */
   @AutoLogOutput(key = "SwerveChassisSpeeds/Measured")
-  private ChassisSpeeds getChassisSpeeds() {
+  public ChassisSpeeds getChassisSpeeds() {
     return kinematics.toChassisSpeeds(getModuleStates()); // uses inverse kinematics
   }
 
@@ -1136,8 +1221,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @param wantedState the desired state
    */
   public void setWantedState(WantedState wantedState) {
-    // once we entire a command based state, reset the early cancel variable
-    if (wantedState == WantedState.EXTERNAL_COMMAND_CONTROL) {
+    // once we enter a command based state, reset the early cancel variable
+    if (wantedState == WantedState.PATH_ON_THE_FLY || wantedState == WantedState.SYS_ID) {
       setEarlyCommandCancel(false);
     }
 
@@ -1169,6 +1254,10 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    */
   public void setOmegaJoystickInput(double omega) {
     omegaJoystickInput = omega;
+  }
+
+  public void setSysIDtoRun(SysIdtoRun sysIdtoRun) {
+    this.sysIdtoRun = sysIdtoRun;
   }
 
   /**
@@ -1298,10 +1387,75 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   /**
    * sets the autopilot target to match a preconfigured APTarget
    *
-   * @param autoPiloTarget the target to set to
+   * @param autoPilotTarget the target to set to
    */
   public void setAutoPilotTarget(APTarget autoPilotTarget) {
     this.autoPilotTarget = autoPilotTarget;
+  }
+
+  /**
+   * sets pose for path on the fly
+   *
+   * @param pose the desired pose to drive to
+   */
+  public void setPathOntheFlyPose(Pose2d pose) {
+    pathOntheFlyPose = pose;
+  }
+
+  /**
+   * sets the max xy speed during path on the fly
+   *
+   * @param speed the max speed in meters per second
+   */
+  public void setMaxTransSpeedOnTheFly(double speed) {
+    maxTransSpeedMpsOnTheFly = speed;
+  }
+
+  /**
+   * sets the max xy acceleration during path on the fly
+   *
+   * @param speed the max acceleration in meters per second^2
+   */
+  public void setMaxTransAccelOnTheFly(double speed) {
+    maxTransAccelMpssqOnTheFly = speed;
+  }
+
+  /**
+   * sets the max rotational speed during path on the fly
+   *
+   * @param speed the max speed in meters per second^2
+   */
+  public void setMaxRotSpeedOnTheFly(double speed) {
+    maxRotSpeedRadPerSecOnTheFly = speed;
+  }
+
+  /**
+   * sets the max rotational acceleration during path on the fly
+   *
+   * @param speed the max acceleration in radians per second^2
+   */
+  public void setMaxRotAccelOnTheFly(double speed) {
+    maxRotAccelRadPerSecSqOnTheFly = speed;
+  }
+
+  /**
+   * set the what speed we want to end path on the fly at generally 0 to stop at the end of the
+   * path, but could be higher to chain to another path/drive to point
+   *
+   * @param speed the desired speed in meters per second
+   */
+  public void setIdealEndVeloOntheFly(double speed) {
+    idealEndVeloOntheFly = speed;
+  }
+
+  /** sets the path constraints for path on the fly */
+  public void setPathConstraintsOnTheFly() {
+    pathConstraintsOnTheFly =
+        new PathConstraints(
+            maxTransSpeedMpsOnTheFly,
+            maxTransAccelMpssqOnTheFly,
+            maxRotSpeedRadPerSecOnTheFly,
+            maxRotAccelRadPerSecSqOnTheFly);
   }
 
   /**
