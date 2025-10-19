@@ -13,10 +13,11 @@
 
 package frc.robot;
 
-import edu.wpi.first.hal.AllianceStationID;
-import edu.wpi.first.wpilibj.simulation.DriverStationSim;
+import com.pathplanner.lib.commands.PathfindingCommand;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.InstantCommand;
+import frc.robot.Subsystems.Drive.Drive.WantedState;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
 import org.littletonrobotics.junction.Logger;
@@ -84,6 +85,8 @@ public class Robot extends LoggedRobot {
     Logger.registerURCL(URCL.startExternal());
 
     robotContainer = new RobotContainer();
+
+    PathfindingCommand.warmupCommand().schedule();
   }
 
   /** This function is called periodically during all modes. */
@@ -96,7 +99,6 @@ public class Robot extends LoggedRobot {
   @Override
   public void disabledInit() {
     robotContainer.resetSimulationField();
-    DriverStationSim.setAllianceStationId(AllianceStationID.Blue1);
   }
 
   /** This function is called periodically when disabled. */
@@ -106,11 +108,18 @@ public class Robot extends LoggedRobot {
   /** This autonomous runs the autonomous command selected by your {@link RobotContainer} class. */
   @Override
   public void autonomousInit() {
+    robotContainer.resetSimulationField();
+
+    new InstantCommand(
+            () -> robotContainer.drive.setWantedState(WantedState.AUTO), robotContainer.drive)
+        .schedule();
     autonomousCommand = robotContainer.getAutonomousCommand();
+    new InstantCommand(() -> System.out.println("auto")).schedule();
 
     // schedule the autonomous command (example)
     if (autonomousCommand != null) {
       autonomousCommand.schedule();
+      System.out.println(autonomousCommand.getName());
     }
   }
 
@@ -142,14 +151,11 @@ public class Robot extends LoggedRobot {
 
   /** This function is called once when the robot is first started up. */
   @Override
-  public void simulationInit() {
-    DriverStationSim.setAllianceStationId(AllianceStationID.Blue1);
-  }
+  public void simulationInit() {}
 
   /** This function is called periodically whilst in simulation. */
   @Override
   public void simulationPeriodic() {
     robotContainer.updateSimulation();
-    DriverStationSim.setAllianceStationId(AllianceStationID.Blue1);
   }
 }

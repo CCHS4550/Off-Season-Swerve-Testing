@@ -52,7 +52,6 @@ public class ModuleIOSpark implements ModuleIO {
 
   private final AnalogEncoder absoluteEncoder;
   private final AnalogInput absoluteAnalogInput;
-  private final int index;
 
   // closed loop control for both motors
   private final SparkClosedLoopController driveController;
@@ -78,7 +77,6 @@ public class ModuleIOSpark implements ModuleIO {
    */
   public ModuleIOSpark(int module) {
 
-    index = module;
     // use switch statement to set offset for currect module
     rotationOffset =
         switch (module) {

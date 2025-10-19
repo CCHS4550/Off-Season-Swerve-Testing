@@ -1,6 +1,7 @@
 package frc.robot.Subsystems.Drive;
 
-import static edu.wpi.first.units.Units.*;
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Volts;
 
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.config.PIDConstants;
@@ -49,8 +50,8 @@ import frc.robot.Constants.Mode;
 import frc.robot.Robotstate;
 import frc.robot.Subsystems.Drive.Gyro.GyroIO;
 import frc.robot.Subsystems.Drive.Gyro.GyroIOInputsAutoLogged;
-import frc.robot.Subsystems.Drive.Module.*;
 import frc.robot.Subsystems.Drive.Module.Module;
+import frc.robot.Subsystems.Drive.Module.ModuleIO;
 import frc.robot.Subsystems.Vision.Vision;
 import frc.robot.Util.LocalADStarAK;
 import java.util.Set;
@@ -182,7 +183,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   @SuppressWarnings("unused")
   private final Consumer<Pose2d> resetSimulationPoseCallBack;
 
-  private enum WantedState {
+  public enum WantedState {
     SYS_ID, // COMMAND CONTROL
     AUTO,
     TELEOP_DRIVE,
@@ -206,9 +207,6 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   }
 
   // which sys id routine to run
-  // note that sysID might also be used as a stand alone command, in which case we would have to
-  // apply the isRunningCommand boolean
-  // as of now not a concern as we will not be runnign sysID
   private enum SysIdtoRun {
     NONE,
     DRIVE_Wheel_Radius_Characterization,
@@ -219,6 +217,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     DYNAMIC_REVERSE
   }
 
+  // the command that we are running
   private enum CommandtoRun {
     NONE,
     SYS_ID,
@@ -1195,9 +1194,9 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    * @param pose the pose to set the bot to
    */
   public void setPose(Pose2d pose) {
+    resetSimulationPoseCallBack.accept(pose);
     poseEstimator.resetPosition(rawGyroRotation, getModulePositions(), pose);
-    Pose2d robotPose = new Pose2d(pose.getTranslation(), rawGyroRotation);
-    Robotstate.getInstance().setPose(robotPose);
+    Robotstate.getInstance().setPose(poseEstimator.getEstimatedPosition());
   }
 
   /**
@@ -1224,6 +1223,10 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     // once we enter a command based state, reset the early cancel variable
     if (wantedState == WantedState.PATH_ON_THE_FLY || wantedState == WantedState.SYS_ID) {
       setEarlyCommandCancel(false);
+    }
+
+    if (wantedState != WantedState.PATH_ON_THE_FLY && wantedState != WantedState.SYS_ID) {
+      commandtoRun = CommandtoRun.NONE;
     }
 
     this.wantedState = wantedState;

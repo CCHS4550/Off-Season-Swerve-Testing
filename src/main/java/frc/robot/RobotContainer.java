@@ -3,9 +3,12 @@ package frc.robot;
 import static frc.robot.Constants.VisionConstants.*;
 
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
+import com.pathplanner.lib.commands.PathPlannerAuto;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import frc.robot.Constants.DriveConstants;
 import frc.robot.ControlSchemes.DriveScheme;
@@ -42,6 +45,7 @@ public class RobotContainer {
   private final LoggedDashboardChooser<Command> autoChooser;
 
   public RobotContainer() {
+
     switch (Constants.currentMode) {
       case REAL:
         // Real robot, instantiate hardware IO implementations
@@ -65,7 +69,7 @@ public class RobotContainer {
         // create a maple-sim swerve drive simulation instance
         this.driveSimulation =
             new SwerveDriveSimulation(
-                DriveConstants.mapleSimConfig, new Pose2d(3, 3, new Rotation2d()));
+                DriveConstants.mapleSimConfig, new Pose2d(2, 7, new Rotation2d()));
         // add the simulated drivetrain to the simulation field
         SimulatedArena.getInstance().addDriveTrainSimulation(driveSimulation);
         // create the simulated drive
@@ -104,7 +108,11 @@ public class RobotContainer {
         break;
     }
 
+    NamedCommands.registerCommand(
+        "test print", new RunCommand(() -> System.out.println("the test auto is running")));
+
     autoChooser = new LoggedDashboardChooser<>("Auto Choices", AutoBuilder.buildAutoChooser());
+    autoChooser.addDefaultOption("test auto", new PathPlannerAuto("test auto"));
   }
 
   public Command getAutonomousCommand() {
@@ -115,7 +123,8 @@ public class RobotContainer {
   public void resetSimulationField() {
     if (Constants.currentMode != Constants.Mode.SIM) return;
 
-    drive.setPose(new Pose2d(3, 3, new Rotation2d()));
+    drive.setPose(new Pose2d(2, 7, new Rotation2d()));
+
     SimulatedArena.getInstance().resetFieldForAuto();
   }
 
