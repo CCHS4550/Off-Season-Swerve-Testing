@@ -32,6 +32,8 @@ public class QuestNavIOQuest implements QuestNavIO {
     }
     inputs.hasEstablishedSetPose = initialPoseSet;
 
+    inputs.robotToQuest = this.robotToQuest;
+
     // looping over the array of unread poseframs this way should allow us to implement further
     // filtering in the future
     List<PoseFrame> poseFrames = new ArrayList<>();
@@ -39,6 +41,7 @@ public class QuestNavIOQuest implements QuestNavIO {
       poseFrames.add(i);
     }
     inputs.unreadPoseFrames = poseFrames.toArray(new PoseFrame[0]);
+    poseFrames.clear();
 
     inputs.appTimeStamp = quest.getAppTimestamp().orElse(0.0);
 
@@ -51,6 +54,12 @@ public class QuestNavIOQuest implements QuestNavIO {
     inputs.trackingLostCounter = quest.getTrackingLostCounter().orElse(0);
   }
 
+  @Override
+  public void commandPeriodic(){
+    quest.commandPeriodic();
+  }
+
+  @Override
   public void setPose(Pose2d pose) {
     initialPoseSet = true;
 

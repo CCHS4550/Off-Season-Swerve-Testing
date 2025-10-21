@@ -3,6 +3,9 @@ package frc.robot.Subsystems.QuestNav;
 import gg.questnav.questnav.PoseFrame;
 import org.littletonrobotics.junction.AutoLog;
 
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Transform3d;
+
 // creates a questnav interface for hardware or sim to fully define
 public interface QuestNavIO {
 
@@ -13,6 +16,8 @@ public interface QuestNavIO {
     public boolean QuestNavConnected = false;
     public boolean QuestNavTracking = false;
     public boolean hasEstablishedSetPose = false;
+
+    public Transform3d robotToQuest = new Transform3d();
 
     public PoseFrame[] unreadPoseFrames = new PoseFrame[0];
 
@@ -26,4 +31,9 @@ public interface QuestNavIO {
   }
   /** Updates the set of loggable inputs. */
   public default void updateInputs(QuestNavIOInputs inputs) {}
+
+  /** must be called periodically for questnav to function */
+  public default void commandPeriodic(){}
+
+  public default void setPose(Pose2d pose){}
 }
