@@ -52,7 +52,6 @@ import frc.robot.Subsystems.Drive.Gyro.GyroIO;
 import frc.robot.Subsystems.Drive.Gyro.GyroIOInputsAutoLogged;
 import frc.robot.Subsystems.Drive.Module.Module;
 import frc.robot.Subsystems.Drive.Module.ModuleIO;
-import frc.robot.Subsystems.Vision.Vision;
 import frc.robot.Util.LocalADStarAK;
 import java.util.Set;
 import java.util.concurrent.locks.Lock;
@@ -62,12 +61,14 @@ import java.util.function.Consumer;
 import org.littletonrobotics.junction.AutoLogOutput;
 import org.littletonrobotics.junction.Logger;
 
+import frc.robot.Subsystems.QuestNav.QuestNav;
+
 /**
  * this creates a drivetrain that tracks on field positions, and is able to move the entire bot
  * according to input uses a state machine function, so most operations should be able to be called
  * by simply changing the wanted state
  */
-public class Drive extends SubsystemBase implements Vision.VisionConsumer {
+public class Drive extends SubsystemBase implements QuestNav.QuestConsumer{
 
   // java lock to implement thread safe
   static final Lock odometryLock = new ReentrantLock();
@@ -1197,6 +1198,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     resetSimulationPoseCallBack.accept(pose);
     poseEstimator.resetPosition(rawGyroRotation, getModulePositions(), pose);
     Robotstate.getInstance().setPose(poseEstimator.getEstimatedPosition());
+    Robotstate.getInstance().informAllPoseListeners(pose);
   }
 
   /**
@@ -1473,10 +1475,10 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   /** Adds a new timestamped vision measurement. */
   @Override
   public void accept(
-      Pose2d visionRobotPoseMeters,
+      Pose2d questRobotPoseMeters,
       double timestampSeconds,
-      Matrix<N3, N1> visionMeasurementStdDevs) {
+      Matrix<N3, N1> questMeasurementStdDevs) {
     poseEstimator.addVisionMeasurement(
-        visionRobotPoseMeters, timestampSeconds, visionMeasurementStdDevs);
+        questRobotPoseMeters, timestampSeconds, questMeasurementStdDevs);
   }
 }

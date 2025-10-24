@@ -12,19 +12,23 @@ import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.wpilibj.Alert;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.Alert.AlertType;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.Robotstate;
 import frc.robot.Subsystems.Vision.Vision;
 import gg.questnav.questnav.PoseFrame;
 
-public class QuestNav extends SubsystemBase implements Vision.VisionConsumer{
-    private final questConsumer consumer;
+public class QuestNav extends SubsystemBase implements Vision.VisionConsumer, Robotstate.RobotstatePoseListener{
+    private final QuestConsumer consumer;
 
     private final QuestNavIO io;
     private final QuestNavIOInputsAutoLogged inputs = new QuestNavIOInputsAutoLogged();
 
     private final Alert disconnectedAlert;
     private final Alert noTrackingAlert;
+
+    private final Timer timer = new Timer();
 
 
     // because the questnav is such a robust odometry system, these standard deviations realistically should not need to change.
@@ -35,7 +39,7 @@ public class QuestNav extends SubsystemBase implements Vision.VisionConsumer{
         0.035 // Trust down to 2 degrees rotational
     );
 
-    public QuestNav(questConsumer consumer, QuestNavIO io){
+    public QuestNav(QuestConsumer consumer, QuestNavIO io){
         this.consumer = consumer;
         this.io = io;
 
@@ -74,24 +78,46 @@ public class QuestNav extends SubsystemBase implements Vision.VisionConsumer{
             Logger.recordOutput("Questnav", rejectedPoseFrames.toArray(new Pose2d[rejectedPoseFrames.size()]));
             Logger.recordOutput("Questnav", acceptedPoseFrames.toArray(new Pose2d[acceptedPoseFrames.size()]));
 
+            backupOdometrySetter();
+
             disconnectedAlert.set(!inputs.QuestNavConnected);
             noTrackingAlert.set(!inputs.QuestNavTracking);
         }
     }
 
-    public void setPose(Pose2d pose){
+    public synchronized void setPose(Pose2d pose){ // needs to be synchronized b/c vision & the backup odometry could hypothetically try to update the pose at same time
         io.setPose(pose);
+    }
+
+    private void backupOdometrySetter(){
+        if(!inputs.hasEstablishedSetPose && !timer.isRunning()){
+            timer.reset();
+            timer.start();
+        }
+
+        if(timer.hasElapsed(5)){
+            setPose(Robotstate.getInstance().getPose());
+            timer.stop();
+            timer.reset();
+        }
     }
     
     @FunctionalInterface
-    public interface questConsumer{
-        void accept(Pose2d visionRobotPoseMeters,
+    public interface QuestConsumer{
+        void accept(Pose2d questRobotPoseMeters,
         double timestampSeconds, Matrix<N3, N1> questMeasurementStdDevs);
     }
 
     @Override
     public void accept(Pose2d visionRobotPoseMeters, double timestampSeconds, Matrix<N3, N1> visionMeasurementStdDevs) {
         Pose3d transformedPose = new Pose3d(visionRobotPoseMeters).transformBy(inputs.robotToQuest);
+        
+        setPose(transformedPose.toPose2d());
+    }
+
+    @Override
+    public void accept(Pose2d pose){
+        Pose3d transformedPose = new Pose3d(pose).transformBy(inputs.robotToQuest);
         
         setPose(transformedPose.toPose2d());
     }

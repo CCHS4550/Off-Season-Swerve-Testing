@@ -7,6 +7,7 @@ import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
@@ -19,6 +20,9 @@ import frc.robot.Subsystems.Drive.Gyro.GyroIOSim;
 import frc.robot.Subsystems.Drive.Module.ModuleIO;
 import frc.robot.Subsystems.Drive.Module.ModuleIOSim;
 import frc.robot.Subsystems.Drive.Module.ModuleIOSpark;
+import frc.robot.Subsystems.QuestNav.QuestNav;
+import frc.robot.Subsystems.QuestNav.QuestNavIO;
+import frc.robot.Subsystems.QuestNav.QuestNavIOQuest;
 import frc.robot.Subsystems.Vision.Vision;
 import frc.robot.Subsystems.Vision.VisionIO;
 import frc.robot.Subsystems.Vision.VisionIOSim;
@@ -31,12 +35,11 @@ public class RobotContainer {
 
   // subclasses of the robot
   public final Drive drive;
+  private final QuestNav questNav;
   private final Vision vision;
 
   // drive sim
   private SwerveDriveSimulation driveSimulation = null;
-
-  // superstructure
 
   // controller used
   CommandXboxController primaryController = new CommandXboxController(0);
@@ -57,8 +60,11 @@ public class RobotContainer {
                 new ModuleIOSpark(2),
                 new ModuleIOSpark(3),
                 (pose) -> {});
+        
+        questNav = new QuestNav(drive, new QuestNavIOQuest(new Transform3d())); //the transfrom 3d is blank rn, find its real value and put it in constants
+        
 
-        vision = new Vision(drive, new VisionIO() {}, new VisionIO() {});
+        vision = new Vision(questNav, new VisionIO() {}, new VisionIO() {});
 
         // configure control schemes
         DriveScheme.configure(drive, primaryController);
@@ -82,9 +88,11 @@ public class RobotContainer {
                 new ModuleIOSim(driveSimulation.getModules()[3]),
                 driveSimulation::setSimulationWorldPose);
 
+        questNav = new QuestNav(drive, new QuestNavIO() {});
+
         vision =
             new Vision(
-                drive,
+                questNav,
                 new VisionIOSim(
                     camera0Name, robotToCamera0, driveSimulation::getSimulatedDriveTrainPose),
                 new VisionIOSim(
@@ -103,7 +111,10 @@ public class RobotContainer {
                 new ModuleIO() {},
                 new ModuleIO() {},
                 (pose) -> {});
-        vision = new Vision(drive, new VisionIO() {}, new VisionIO() {});
+
+        questNav = new QuestNav(drive, new QuestNavIO() {});
+
+        vision = new Vision(questNav, new VisionIO() {}, new VisionIO() {});
 
         break;
     }
