@@ -1,10 +1,9 @@
 package frc.robot.Subsystems.QuestNav;
 
-import gg.questnav.questnav.PoseFrame;
-import org.littletonrobotics.junction.AutoLog;
-
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Transform3d;
+import gg.questnav.questnav.PoseFrame;
+import org.littletonrobotics.junction.AutoLog;
 
 // creates a questnav interface for hardware or sim to fully define
 public interface QuestNavIO {
@@ -33,7 +32,7 @@ public interface QuestNavIO {
   public default void updateInputs(QuestNavIOInputs inputs) {}
 
   /** must be called periodically for questnav to function */
-  public default void commandPeriodic(){}
+  public default void commandPeriodic() {}
 
-  public default void setPose(Pose2d pose){}
+  public default void setPose(Pose2d pose) {}
 }

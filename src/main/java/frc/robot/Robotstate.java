@@ -3,7 +3,6 @@ package frc.robot;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -36,7 +35,7 @@ public class Robotstate {
 
   private List<RobotstatePoseListener> robotstatePoseListeners = new ArrayList<>();
 
-  public void addListener(RobotstatePoseListener listener){
+  public void addListener(RobotstatePoseListener listener) {
     robotstatePoseListeners.add(listener);
   }
 
@@ -99,8 +98,8 @@ public class Robotstate {
     return gyroYawVelo;
   }
 
-  public void informAllPoseListeners(Pose2d pose){
-    for( RobotstatePoseListener listener : robotstatePoseListeners){
+  public void informAllPoseListeners(Pose2d pose) {
+    for (RobotstatePoseListener listener : robotstatePoseListeners) {
       listener.accept(pose);
     }
   }

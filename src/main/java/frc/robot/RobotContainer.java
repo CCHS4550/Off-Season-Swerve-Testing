@@ -60,9 +60,15 @@ public class RobotContainer {
                 new ModuleIOSpark(2),
                 new ModuleIOSpark(3),
                 (pose) -> {});
-        
-        questNav = new QuestNav(drive, new QuestNavIOQuest(new Transform3d())); //the transfrom 3d is blank rn, find its real value and put it in constants
-        
+
+        questNav =
+            new QuestNav(
+                drive,
+                new QuestNavIOQuest(
+                    new Transform3d())); // the transfrom 3d is blank rn, find its real value and
+        // put it in constants
+
+        Robotstate.getInstance().addListener(questNav);
 
         vision = new Vision(questNav, new VisionIO() {}, new VisionIO() {});
 

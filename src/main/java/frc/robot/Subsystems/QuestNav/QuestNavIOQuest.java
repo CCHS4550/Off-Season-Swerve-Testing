@@ -55,7 +55,7 @@ public class QuestNavIOQuest implements QuestNavIO {
   }
 
   @Override
-  public void commandPeriodic(){
+  public void commandPeriodic() {
     quest.commandPeriodic();
   }
 
