@@ -103,6 +103,7 @@ public final class Constants {
     public static final double deadband = 0.2;
     public static final double driveToPointStaticFrictionConstant = 0.02;
     public static final double maxSpeedMetersPerSec = 4.8;
+    public static final double maxModuleRotSpeedRadiansPerSec = 10.0;
     public static final double odometryFrequency = 80.0; // Hz
 
     // TODO: URGENT, get physical bot constants from mechanical
