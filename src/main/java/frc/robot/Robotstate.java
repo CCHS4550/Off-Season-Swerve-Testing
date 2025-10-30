@@ -3,6 +3,8 @@ package frc.robot;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.IntStream;
 
 /**
@@ -30,6 +32,12 @@ public class Robotstate {
   private ChassisSpeeds chassisSpeeds; // chassis speeds of bot in meters/sec
   private double gyroYawVelo; // the gyroscope velocity in radians per sec
   private int[] allowedTagPoses = IntStream.range(1, 23).toArray();
+
+  private List<RobotstatePoseListener> robotstatePoseListeners = new ArrayList<>();
+
+  public void addListener(RobotstatePoseListener listener) {
+    robotstatePoseListeners.add(listener);
+  }
 
   /** will be called periodically in drive to update Robotstate's information */
   public synchronized void updateBotPoseAndSpeeds(Pose2d pose, ChassisSpeeds chassisSpeeds) {
@@ -88,5 +96,17 @@ public class Robotstate {
 
   public synchronized double getGyroVeloRadPerSec() {
     return gyroYawVelo;
+  }
+
+  public void informAllPoseListeners(Pose2d pose) {
+    for (RobotstatePoseListener listener : robotstatePoseListeners) {
+      listener.accept(pose);
+    }
+  }
+
+  @FunctionalInterface
+  public interface RobotstatePoseListener {
+    // could be given more parameters later but for now the only one we care about is the pose
+    void accept(Pose2d pose);
   }
 }

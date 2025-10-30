@@ -8,7 +8,10 @@ import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.path.PathConstraints;
 import com.pathplanner.lib.pathfinding.Pathfinding;
+import com.pathplanner.lib.util.DriveFeedforwards;
 import com.pathplanner.lib.util.PathPlannerLogging;
+import com.pathplanner.lib.util.swerve.SwerveSetpoint;
+import com.pathplanner.lib.util.swerve.SwerveSetpointGenerator;
 import com.therekrab.autopilot.APConstraints;
 import com.therekrab.autopilot.APProfile;
 import com.therekrab.autopilot.APTarget;
@@ -52,8 +55,9 @@ import frc.robot.Subsystems.Drive.Gyro.GyroIO;
 import frc.robot.Subsystems.Drive.Gyro.GyroIOInputsAutoLogged;
 import frc.robot.Subsystems.Drive.Module.Module;
 import frc.robot.Subsystems.Drive.Module.ModuleIO;
-import frc.robot.Subsystems.Vision.Vision;
+import frc.robot.Subsystems.QuestNav.QuestNav;
 import frc.robot.Util.LocalADStarAK;
+import java.util.EnumSet;
 import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -67,7 +71,7 @@ import org.littletonrobotics.junction.Logger;
  * according to input uses a state machine function, so most operations should be able to be called
  * by simply changing the wanted state
  */
-public class Drive extends SubsystemBase implements Vision.VisionConsumer {
+public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
 
   // java lock to implement thread safe
   static final Lock odometryLock = new ReentrantLock();
@@ -105,6 +109,9 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
 
   // variable used to track rotation of the robot
   private Rotation2d rawGyroRotation = new Rotation2d();
+
+  private final SwerveSetpointGenerator setPointGenerator;
+  private SwerveSetpoint previousSetpoint;
 
   // values to use during teleop, these will be periodically set during the default command
   private double xJoystickInput = 0.0;
@@ -191,8 +198,11 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     DRIVE_TO_POINT,
     AUTOPILOT,
     PATH_ON_THE_FLY, // COMMAND CONTROL
-    IDLE
+    IDLE;
   }
+
+  EnumSet<WantedState> WantedStateCommandControl =
+      EnumSet.of(WantedState.SYS_ID, WantedState.PATH_ON_THE_FLY);
 
   // state the drive train is in
   private enum SystemState {
@@ -206,6 +216,8 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     IDLE
   }
 
+  EnumSet<WantedState> SystemStateCommandControl =
+      EnumSet.of(WantedState.SYS_ID, WantedState.PATH_ON_THE_FLY);
   // which sys id routine to run
   private enum SysIdtoRun {
     NONE,
@@ -290,6 +302,21 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
         Constants.DriveConstants.ppConfig,
         () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
         this);
+
+    setPointGenerator =
+        new SwerveSetpointGenerator(
+            Constants.DriveConstants.ppConfig, Constants.DriveConstants.maxModuleRotSpeedRadiansPerSec);
+
+    // Initialize the previous setpoint to the robot's current speeds & module states
+    ChassisSpeeds currentSpeeds =
+        getChassisSpeeds(); // Method to get current robot-relative chassis speeds
+    SwerveModuleState[] currentStates =
+        getModuleStates(); // Method to get the current swerve module states
+    previousSetpoint =
+        new SwerveSetpoint(
+            currentSpeeds,
+            currentStates,
+            DriveFeedforwards.zeros(Constants.DriveConstants.ppConfig.numModules));
 
     setPathConstraintsOnTheFly();
     // make sure our angle controller wraps angles properly
@@ -444,7 +471,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
 
     // if we are not in a command control state, set the early cancel to true
     // and reset the command trigger to false to be ready for a new command to be scheduled
-    if (wantedState != WantedState.PATH_ON_THE_FLY && wantedState != WantedState.SYS_ID) {
+    if ((!WantedStateCommandControl.contains(wantedState))) {
       setEarlyCommandCancel(true);
       shouldExecuteCommand = () -> false;
     }
@@ -452,7 +479,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     // switch states if the command ought to end early so we dont get stuck in the command control
     // state
     if (shouldCancelCommandEarly.getAsBoolean()
-        && (wantedState == WantedState.PATH_ON_THE_FLY || wantedState == WantedState.SYS_ID)) {
+        && (WantedStateCommandControl.contains(wantedState))) {
       if (DriverStation.isAutonomous()) {
         setWantedState(WantedState.AUTO);
       } else {
@@ -527,14 +554,12 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   private void runVelocity(ChassisSpeeds speeds) {
 
     // calculate and optomize our given speeds
-    ChassisSpeeds discreteSpeeds =
-        ChassisSpeeds.discretize(
-            speeds,
-            0.02); // seperate individual velocity components for a given timestamp. Keep in mind
-    // this can be thrown off if the speeds are later scaled
+    previousSetpoint = setPointGenerator.generateSetpoint(previousSetpoint, speeds, 0.02);
     SwerveModuleState[] setPointStates =
         kinematics.toSwerveModuleStates(
-            discreteSpeeds); // turn the speeds to module states(drive motor speed and turn motor
+            previousSetpoint
+                .robotRelativeSpeeds()); // turn the speeds to module states(drive motor speed and
+    // turn motor
     // angle)
     SwerveDriveKinematics.desaturateWheelSpeeds(
         setPointStates,
@@ -545,7 +570,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
 
     // logging
     Logger.recordOutput("SwerveStates/Setpoints", setPointStates);
-    Logger.recordOutput("SwerveChassisSpeeds/Setpoints", discreteSpeeds);
+    Logger.recordOutput("SwerveChassisSpeeds/Setpoints", previousSetpoint);
 
     // set all modules to our found states. Note that we still have to optomize our wheel angle for
     // better wraparound
@@ -580,15 +605,19 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     }
 
     // calculate and optomize our given speeds
-    ChassisSpeeds discreteSpeeds =
-        ChassisSpeeds.discretize(
-            speeds,
-            0.02); // seperate individual velocity components for a given timestamp. Keep in mind
-    // this can be thrown off if the speeds are later scaled
+    previousSetpoint = setPointGenerator.generateSetpoint(previousSetpoint, speeds, 0.02);
     SwerveModuleState[] setPointStates =
         kinematics.toSwerveModuleStates(
-            discreteSpeeds); // turn the speeds to module states(drive motor speed and turn motor
+            previousSetpoint
+                .robotRelativeSpeeds()); // turn the speeds to module states(drive motor speed and
+    // turn motor
     // angle)
+    SwerveDriveKinematics.desaturateWheelSpeeds(
+        setPointStates,
+        Constants.DriveConstants
+            .maxSpeedMetersPerSec); // normalizes wheel velocity if any individual modules are above
+    // the max speed. Keep in mind that if this is called, the
+    // discretization will be innaccurate
     SwerveDriveKinematics.desaturateWheelSpeeds(
         setPointStates,
         Constants.DriveConstants
@@ -598,7 +627,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
 
     // logging
     Logger.recordOutput("SwerveStates/Setpoints", setPointStates);
-    Logger.recordOutput("SwerveChassisSpeeds/Setpoints", discreteSpeeds);
+    Logger.recordOutput("SwerveChassisSpeeds/Setpoints", previousSetpoint);
 
     // set all modules to our found states. Note that we still have to optomize our wheel angle for
     // better wraparound
@@ -1197,6 +1226,7 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
     resetSimulationPoseCallBack.accept(pose);
     poseEstimator.resetPosition(rawGyroRotation, getModulePositions(), pose);
     Robotstate.getInstance().setPose(poseEstimator.getEstimatedPosition());
+    Robotstate.getInstance().informAllPoseListeners(pose);
   }
 
   /**
@@ -1221,11 +1251,11 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
    */
   public void setWantedState(WantedState wantedState) {
     // once we enter a command based state, reset the early cancel variable
-    if (wantedState == WantedState.PATH_ON_THE_FLY || wantedState == WantedState.SYS_ID) {
+    if (WantedStateCommandControl.contains(wantedState)) {
       setEarlyCommandCancel(false);
     }
 
-    if (wantedState != WantedState.PATH_ON_THE_FLY && wantedState != WantedState.SYS_ID) {
+    if (!WantedStateCommandControl.contains(wantedState)) {
       commandtoRun = CommandtoRun.NONE;
     }
 
@@ -1473,10 +1503,10 @@ public class Drive extends SubsystemBase implements Vision.VisionConsumer {
   /** Adds a new timestamped vision measurement. */
   @Override
   public void accept(
-      Pose2d visionRobotPoseMeters,
+      Pose2d questRobotPoseMeters,
       double timestampSeconds,
-      Matrix<N3, N1> visionMeasurementStdDevs) {
+      Matrix<N3, N1> questMeasurementStdDevs) {
     poseEstimator.addVisionMeasurement(
-        visionRobotPoseMeters, timestampSeconds, visionMeasurementStdDevs);
+        questRobotPoseMeters, timestampSeconds, questMeasurementStdDevs);
   }
 }
