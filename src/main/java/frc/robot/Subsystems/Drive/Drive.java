@@ -305,7 +305,8 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
 
     setPointGenerator =
         new SwerveSetpointGenerator(
-            Constants.DriveConstants.ppConfig, Constants.DriveConstants.maxModuleRotSpeedRadiansPerSec);
+            Constants.DriveConstants.ppConfig,
+            Constants.DriveConstants.maxModuleRotSpeedRadiansPerSec);
 
     // Initialize the previous setpoint to the robot's current speeds & module states
     ChassisSpeeds currentSpeeds =

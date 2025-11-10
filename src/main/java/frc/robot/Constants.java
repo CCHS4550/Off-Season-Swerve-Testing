@@ -106,9 +106,9 @@ public final class Constants {
     public static final double maxModuleRotSpeedRadiansPerSec = 10.0;
     public static final double odometryFrequency = 80.0; // Hz
 
-    // TODO: URGENT, get physical bot constants from mechanical
-    public static final double trackWidth = Units.inchesToMeters(26.5);
-    public static final double wheelBase = Units.inchesToMeters(26.5);
+    // Taken with measuring tape, distance between centers of wheels
+    public static final double trackWidth = Units.inchesToMeters(19.375);
+    public static final double wheelBase = Units.inchesToMeters(22.25);
     public static final double driveBaseRadius = Math.hypot(trackWidth / 2.0, wheelBase / 2.0);
     public static final Translation2d[] moduleTranslations =
         new Translation2d[] {
@@ -209,7 +209,7 @@ public final class Constants {
 
     // PathPlanner configuration
     // TODO: set this to the correct values
-    public static final double robotMassKg = 45;
+    public static final double robotMassKg = Units.lbsToKilograms(38.375 + 13.5);
     public static final double robotMOI = 6.883;
     public static final double wheelCOF = 1.2;
     public static final RobotConfig ppConfig =
