@@ -127,20 +127,20 @@ public final class Constants {
     // Device CAN IDs
     public static final int pigeonCanId = 9; // TODO: URGENT, switch to a nav x
 
-    public static final int frontRightDriveCanId = 3;
+    public static final int frontRightDriveCanId = 1;
     public static final int frontLeftDriveCanId = 7;
-    public static final int backRightDriveCanId = 2;
-    public static final int backLeftDriveCanId = 9;
+    public static final int backRightDriveCanId = 3;
+    public static final int backLeftDriveCanId = 5;
 
-    public static final int frontRightTurnCanId = 4;
-    public static final int frontLeftTurnCanId = 6;
-    public static final int backRightTurnCanId = 1;
-    public static final int backLeftTurnCanId = 8;
+    public static final int frontRightTurnCanId = 2;
+    public static final int frontLeftTurnCanId = 8;
+    public static final int backRightTurnCanId = 4;
+    public static final int backLeftTurnCanId = 6;
 
-    public static final int frontRightTurnEncoder = 1;
-    public static final int frontLeftTurnEncoder = 3;
-    public static final int backRightTurnEncoder = 0;
-    public static final int backLeftTurnEncoder = 2;
+    public static final int frontRightTurnEncoder = 0;
+    public static final int frontLeftTurnEncoder = 2;
+    public static final int backRightTurnEncoder = 1;
+    public static final int backLeftTurnEncoder = 3;
 
     public static final boolean frontLeftTurnInverted = true;
     public static final boolean frontRightTurnInverted = true;

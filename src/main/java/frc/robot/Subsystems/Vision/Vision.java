@@ -220,6 +220,8 @@ public class Vision extends SubsystemBase {
     return true;
   }
 
+  // only consumer is the questnav currently, but keep this information incase we need to plug
+  // vision into a pose estimator later
   @FunctionalInterface
   public interface VisionConsumer {
     void accept(

@@ -110,6 +110,8 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
   // variable used to track rotation of the robot
   private Rotation2d rawGyroRotation = new Rotation2d();
 
+  // breaks down swerve speed requests into timed chunks of 0.02, and restricts them to certain
+  // physics constraints
   private final SwerveSetpointGenerator setPointGenerator;
   private SwerveSetpoint previousSetpoint;
 
@@ -200,7 +202,8 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
     PATH_ON_THE_FLY, // COMMAND CONTROL
     IDLE;
   }
-
+  // Enum set that determines command controlled characteristics
+  // you MUST add to this or else command control wont work
   EnumSet<WantedState> WantedStateCommandControl =
       EnumSet.of(WantedState.SYS_ID, WantedState.PATH_ON_THE_FLY);
 
@@ -215,7 +218,8 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
     PATH_ON_THE_FLY, // COMMAND CONTROL
     IDLE
   }
-
+  // Enum set that determines command controlled characteristics
+  // you MUST add to this or else command control wont work
   EnumSet<WantedState> SystemStateCommandControl =
       EnumSet.of(WantedState.SYS_ID, WantedState.PATH_ON_THE_FLY);
   // which sys id routine to run
@@ -253,6 +257,9 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
 
   // creates a swervedrive pose estimator, can be used to fuse with vision and does the math needed
   // to update given our bots information
+  // has a kalman filter to help remove noise
+  // NOTE that due to the math of the kalman filter, a large discrpency in the rotation will cause
+  // it to spiral out of control
   private SwerveDrivePoseEstimator poseEstimator =
       new SwerveDrivePoseEstimator(kinematics, rawGyroRotation, lastModulePos, new Pose2d());
 
@@ -303,9 +310,11 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
         () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
         this);
 
+    // set the contraints of our setpoint
     setPointGenerator =
         new SwerveSetpointGenerator(
-            Constants.DriveConstants.ppConfig, Constants.DriveConstants.maxModuleRotSpeedRadiansPerSec);
+            Constants.DriveConstants.ppConfig,
+            Constants.DriveConstants.maxModuleRotSpeedRadiansPerSec);
 
     // Initialize the previous setpoint to the robot's current speeds & module states
     ChassisSpeeds currentSpeeds =
@@ -318,6 +327,7 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
             currentStates,
             DriveFeedforwards.zeros(Constants.DriveConstants.ppConfig.numModules));
 
+    // sets initial contraints for path on the fly
     setPathConstraintsOnTheFly();
     // make sure our angle controller wraps angles properly
     angleController.enableContinuousInput(-Math.PI, Math.PI);
@@ -334,6 +344,9 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
      *  This allows us to make sure all the commands stay working around one central scheduler
      *
      *  <p> note that because triggers are periodically checked by the command scheduler, we should be able to simply set these conditions here and allow the command scheduler to do the rest for us
+     *
+     * <p> there is a potential death condition for auto built in here where the triggers on false declaration will interrupt the autos scheduled command
+     * <p> TODO: fix this the triggers behavior in auto
      */
     executeCommand.onTrue(runCommandControl());
     executeCommand.onFalse(halt());
@@ -448,10 +461,6 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
     // turn the states into desired output
     applyStates();
 
-    // for (int i = 0; i < 4; i++) {
-    //   modules[i].runCharacterization(10);
-    // }
-
     Robotstate.getInstance().updateBotPoseAndSpeeds(getPose(), getChassisSpeeds());
     Robotstate.getInstance().updateRawGyroVelo(gyroInputs.yawVelocityRadPerSec);
 
@@ -509,6 +518,7 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
         break;
       case AUTO: // AUTO just automatically breaks because it is made of a completely planned set of
         // commands to follow that don't require a periodic state system
+        // we don't even need to consider trigger conditions
         break;
       case TELEOP_DRIVE:
         Logger.recordOutput("Subsystems/Drive/ joystick x", xJoystickInput);

@@ -34,5 +34,11 @@ public interface QuestNavIO {
   /** must be called periodically for questnav to function */
   public default void commandPeriodic() {}
 
+  /**
+   * the quests initial pose is set
+   *
+   * <p>Note that because questnav is a dead reckoning system, this must be set for it to work
+   * properly
+   */
   public default void setPose(Pose2d pose) {}
 }

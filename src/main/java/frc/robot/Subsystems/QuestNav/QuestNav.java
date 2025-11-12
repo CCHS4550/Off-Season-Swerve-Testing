@@ -17,16 +17,20 @@ import java.util.LinkedList;
 import java.util.List;
 import org.littletonrobotics.junction.Logger;
 
+// this class listens to Vision and robot state for occasionally forced pose resets
+// this class implements drive as a listener to periodically update
 public class QuestNav extends SubsystemBase
     implements Vision.VisionConsumer, Robotstate.RobotstatePoseListener {
   private final QuestConsumer consumer;
 
+  // logging and interaction with the hardware
   private final QuestNavIO io;
   private final QuestNavIOInputsAutoLogged inputs = new QuestNavIOInputsAutoLogged();
 
   private final Alert disconnectedAlert;
   private final Alert noTrackingAlert;
 
+  // timer to be used to determine when to forcibly reset to robot pose
   private final Timer timer = new Timer();
 
   // because the questnav is such a robust odometry system, these standard deviations realistically
@@ -48,6 +52,7 @@ public class QuestNav extends SubsystemBase
 
   @Override
   public void periodic() {
+    // unsure whether or not this should be synchronized or not
     io.commandPeriodic();
     synchronized (inputs) {
       io.updateInputs(inputs);
@@ -57,6 +62,9 @@ public class QuestNav extends SubsystemBase
       List<Pose2d> rejectedPoseFrames = new LinkedList<>();
       List<Pose2d> acceptedPoseFrames = new LinkedList<>();
 
+      // supposed to loop through all available pose frames and mark if they ought to be used
+      // the official implementation simply reads the most recent frame, which may benefit on field
+      // performance
       for (PoseFrame givenPoseFrame : inputs.unreadPoseFrames) {
         boolean rejectFrame = !inputs.QuestNavTracking || !inputs.hasEstablishedSetPose;
 
@@ -94,6 +102,11 @@ public class QuestNav extends SubsystemBase
     io.setPose(pose);
   }
 
+  /**
+   * if the questnav has gone long enough (5 arbitrary seconds) and vision has not given us a proper
+   * pose to reset to then we reset to the robot pose and hope for the best to at least reestablish
+   * quest tracking
+   */
   private void backupOdometrySetter() {
     if (!inputs.hasEstablishedSetPose && !timer.isRunning()) {
       timer.reset();

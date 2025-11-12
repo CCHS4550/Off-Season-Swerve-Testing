@@ -8,6 +8,7 @@ import gg.questnav.questnav.QuestNav;
 import java.util.ArrayList;
 import java.util.List;
 
+// physical questnav hardware
 public class QuestNavIOQuest implements QuestNavIO {
   protected final QuestNav quest = new QuestNav();
   protected final Transform3d robotToQuest;
@@ -27,6 +28,9 @@ public class QuestNavIOQuest implements QuestNavIO {
     inputs.QuestNavConnected = quest.isConnected();
     inputs.QuestNavTracking = quest.isTracking();
 
+    // if the quest has lost tracking, its data is essentially useless until it has been
+    // reestablished,
+    // so we can assume initial pose needs to be set again
     if (!quest.isTracking()) {
       initialPoseSet = false;
     }
@@ -43,6 +47,9 @@ public class QuestNavIOQuest implements QuestNavIO {
     inputs.unreadPoseFrames = poseFrames.toArray(new PoseFrame[0]);
     poseFrames.clear();
 
+    // for these optional values, if for some reason the quest chooses not to return, it defaults to
+    // zero
+    // should probably throw a warning too
     inputs.appTimeStamp = quest.getAppTimestamp().orElse(0.0);
 
     inputs.latencyMS = quest.getLatency();
@@ -61,6 +68,7 @@ public class QuestNavIOQuest implements QuestNavIO {
 
   @Override
   public void setPose(Pose2d pose) {
+    // the pose must be adjusted by its position on the robot
     initialPoseSet = true;
 
     Pose3d tempPose = new Pose3d(pose);
