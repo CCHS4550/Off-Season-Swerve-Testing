@@ -15,7 +15,7 @@ import java.util.function.DoubleSupplier;
 /** how a controller interacts with the drive train */
 public class DriveScheme {
   // slow mode or fast mode
-  private static DoubleSupplier driveSpeedModifier = () -> 0.2;
+  private static DoubleSupplier driveSpeedModifier = () -> 0.5;
 
   static Transform2d tagTransform =
       new Transform2d(
