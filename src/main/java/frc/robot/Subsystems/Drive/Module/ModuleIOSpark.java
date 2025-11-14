@@ -46,7 +46,7 @@ public class ModuleIOSpark implements ModuleIO {
   // the motors and encoders of the module
   // declared as sparkbases, which means it could be either MAX or FLEX, we only use maxes
   private final SparkBase driveSpark;
-  private final SparkBase turnSpark;
+  private final SparkMax turnSpark;
   private final RelativeEncoder driveEncoder;
   // private final AbsoluteEncoder turnEncoder;
 
@@ -55,7 +55,7 @@ public class ModuleIOSpark implements ModuleIO {
 
   // closed loop control for both motors
   private final SparkClosedLoopController driveController;
-  private final SparkClosedLoopController turnController;
+  //private final SparkClosedLoopController turnController;
 
   private final PIDController turnPID =
       new PIDController(Constants.DriveConstants.turnKp, 0.0, Constants.DriveConstants.turnKd);
@@ -120,11 +120,11 @@ public class ModuleIOSpark implements ModuleIO {
             MotorType.kBrushless);
     // declare encoders for both motors
     driveEncoder = driveSpark.getEncoder(); // don't need an absolute encoder for drive
-    // turnEncoder = turnSpark.getAbsoluteEncoder();
+    //turnEncoder = turnSpark.getAbsoluteEncoder();
 
     // declare closed loop control for both motors
     driveController = driveSpark.getClosedLoopController();
-    turnController = turnSpark.getClosedLoopController();
+    //turnController = turnSpark.getClosedLoopController();
 
     turnPID.enableContinuousInput(0, Math.PI);
 
@@ -334,10 +334,7 @@ public class ModuleIOSpark implements ModuleIO {
     SparkUtil.stickyFault = false;
     inputs.turnPosition =
         Rotation2d.fromRotations(absoluteEncoder.get()).minus(rotationOffset).plus(Rotation2d.kPi);
-    ifOk(
-        turnSpark,
-        turnSpark.getEncoder()::getVelocity,
-        (value) -> inputs.turnVelocityRadPerSec = value);
+    inputs.turnVelocityRadPerSec = Rotation2d.fromRotations(turnSpark.getEncoder().getVelocity()).getRadians();
     ifOK(
         turnSpark,
         new DoubleSupplier[] {turnSpark::getAppliedOutput, turnSpark::getBusVoltage},

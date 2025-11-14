@@ -96,9 +96,9 @@ public class Module {
    * @param output volts
    */
   public void runCharacterization(double output) {
-    // io.setTurnOpenLoop(output);
-    io.setTurnPos(Rotation2d.fromDegrees(0));
-    // io.setDriveOpenLoop(output);
+    io.setTurnOpenLoop(output);
+    // io.setTurnPos(Rotation2d.fromDegrees(0));
+    io.setDriveOpenLoop(output);
   }
 
   /**

@@ -7,7 +7,6 @@ import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
@@ -15,17 +14,11 @@ import frc.robot.Constants.DriveConstants;
 import frc.robot.ControlSchemes.DriveScheme;
 import frc.robot.Subsystems.Drive.Drive;
 import frc.robot.Subsystems.Drive.Gyro.GyroIO;
-import frc.robot.Subsystems.Drive.Gyro.GyroIONavX;
 import frc.robot.Subsystems.Drive.Gyro.GyroIOSim;
+import frc.robot.Subsystems.Drive.Gyro.GyroPigeon;
 import frc.robot.Subsystems.Drive.Module.ModuleIO;
 import frc.robot.Subsystems.Drive.Module.ModuleIOSim;
 import frc.robot.Subsystems.Drive.Module.ModuleIOSpark;
-import frc.robot.Subsystems.QuestNav.QuestNav;
-import frc.robot.Subsystems.QuestNav.QuestNavIO;
-import frc.robot.Subsystems.QuestNav.QuestNavIOQuest;
-import frc.robot.Subsystems.Vision.Vision;
-import frc.robot.Subsystems.Vision.VisionIO;
-import frc.robot.Subsystems.Vision.VisionIOSim;
 import org.ironmaple.simulation.SimulatedArena;
 import org.ironmaple.simulation.drivesims.SwerveDriveSimulation;
 import org.littletonrobotics.junction.Logger;
@@ -35,8 +28,6 @@ public class RobotContainer {
 
   // subclasses of the robot
   public final Drive drive;
-  private final QuestNav questNav;
-  private final Vision vision;
 
   // drive sim
   private SwerveDriveSimulation driveSimulation = null;
@@ -54,23 +45,12 @@ public class RobotContainer {
         // Real robot, instantiate hardware IO implementations
         drive =
             new Drive(
-                new GyroIONavX(),
+                new GyroPigeon(),
                 new ModuleIOSpark(0),
                 new ModuleIOSpark(1),
                 new ModuleIOSpark(2),
                 new ModuleIOSpark(3),
                 (pose) -> {});
-
-        questNav =
-            new QuestNav(
-                drive,
-                new QuestNavIOQuest(
-                    new Transform3d())); // the transfrom 3d is blank rn, find its real value and
-        // put it in constants
-
-        Robotstate.getInstance().addListener(questNav);
-
-        vision = new Vision(questNav, new VisionIO() {}, new VisionIO() {});
 
         // configure control schemes
         DriveScheme.configure(drive, primaryController);
@@ -94,16 +74,6 @@ public class RobotContainer {
                 new ModuleIOSim(driveSimulation.getModules()[3]),
                 driveSimulation::setSimulationWorldPose);
 
-        questNav = new QuestNav(drive, new QuestNavIO() {});
-
-        vision =
-            new Vision(
-                questNav,
-                new VisionIOSim(
-                    camera0Name, robotToCamera0, driveSimulation::getSimulatedDriveTrainPose),
-                new VisionIOSim(
-                    camera1Name, robotToCamera1, driveSimulation::getSimulatedDriveTrainPose));
-
         DriveScheme.configure(drive, primaryController);
         break;
 
@@ -117,10 +87,6 @@ public class RobotContainer {
                 new ModuleIO() {},
                 new ModuleIO() {},
                 (pose) -> {});
-
-        questNav = new QuestNav(drive, new QuestNavIO() {});
-
-        vision = new Vision(questNav, new VisionIO() {}, new VisionIO() {});
 
         break;
     }
