@@ -107,8 +107,8 @@ public final class Constants {
     public static final double odometryFrequency = 80.0; // Hz
 
     // Taken with measuring tape, distance between centers of wheels
-    public static final double trackWidth = Units.inchesToMeters(19.375);
-    public static final double wheelBase = Units.inchesToMeters(22.25);
+    public static final double trackWidth = Units.inchesToMeters(22.25);
+    public static final double wheelBase = Units.inchesToMeters(19.25);
     public static final double driveBaseRadius = Math.hypot(trackWidth / 2.0, wheelBase / 2.0);
     public static final Translation2d[] moduleTranslations =
         new Translation2d[] {
@@ -154,7 +154,7 @@ public final class Constants {
 
     public static final boolean frontLeftDriveInverted = false;
     public static final boolean frontRightDriveInverted = false;
-    public static final boolean backLeftDriveInverted = false;
+    public static final boolean backLeftDriveInverted = true;
     public static final boolean backRightDriveInverted = false;
 
     // Drive motor configuration
@@ -171,7 +171,7 @@ public final class Constants {
         (2 * Math.PI) / 60.0 / driveMotorReduction; // Rotor RPM -> Wheel Rad/Sec
 
     // Drive PID configuration
-    public static final double driveKp = 0.005;
+    public static final double driveKp = 0.003;
     public static final double driveKd = 0.0;
 
     public static final double driveKs = 0.19268;
