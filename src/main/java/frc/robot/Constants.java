@@ -119,13 +119,18 @@ public final class Constants {
         };
 
     // Zeroed rotation values for each module, see setup instructions
-    public static final Rotation2d frontLeftOffset = Rotation2d.fromRadians(-0.342);
-    public static final Rotation2d frontRightOffset = Rotation2d.fromRadians(0.171);
-    public static final Rotation2d backRightOffset = Rotation2d.fromRadians(-0.669);
-    public static final Rotation2d backLeftOffset = Rotation2d.fromRadians(10.780);
+    public static final Rotation2d frontLeftOffset = Rotation2d.fromRadians(-1.33);
+    public static final Rotation2d frontRightOffset = Rotation2d.fromRadians(-0.92);
+    public static final Rotation2d backRightOffset = Rotation2d.fromRadians(1.69);
+    public static final Rotation2d backLeftOffset = Rotation2d.fromRadians(1.11);
+
+    // public static final Rotation2d frontLeftOffset = Rotation2d.fromRotations(0.605);
+    // public static final Rotation2d frontRightOffset = Rotation2d.fromRotations(3.295);
+    // public static final Rotation2d backRightOffset = Rotation2d.fromRotations(5.75);
+    // public static final Rotation2d backLeftOffset = Rotation2d.fromRotations(0.2485);
 
     // Device CAN IDs
-    public static final int pigeonCanId = 9; // TODO: URGENT, switch to a nav x
+    public static final int pigeonCanId = 9;
 
     public static final int frontRightDriveCanId = 2;
     public static final int frontLeftDriveCanId = 8;
@@ -147,17 +152,17 @@ public final class Constants {
     public static final boolean backLeftTurnInverted = true;
     public static final boolean backRightTurnInverted = true;
 
-    public static final boolean frontLeftDriveInverted = true;
-    public static final boolean frontRightDriveInverted = true;
-    public static final boolean backLeftDriveInverted = true;
-    public static final boolean backRightDriveInverted = true;
+    public static final boolean frontLeftDriveInverted = false;
+    public static final boolean frontRightDriveInverted = false;
+    public static final boolean backLeftDriveInverted = false;
+    public static final boolean backRightDriveInverted = false;
 
     // Drive motor configuration
     public static final int driveMotorCurrentLimit = 60;
     public static final double wheelRadiusMeters = Units.inchesToMeters(2);
-    public static final double driveMotorReduction = 6.12;
+    public static final double driveMotorReduction = 6.75;
     // public static final double driveMotorReduction = (45.0 * 22.0) / (14.0 * 15.0);
-    public static final DCMotor driveGearbox = DCMotor.getNeo550(1);
+    public static final DCMotor driveGearbox = DCMotor.getNEO(1);
 
     // Drive encoder configuration
     public static final double driveEncoderPositionFactor =
@@ -166,12 +171,12 @@ public final class Constants {
         (2 * Math.PI) / 60.0 / driveMotorReduction; // Rotor RPM -> Wheel Rad/Sec
 
     // Drive PID configuration
-    public static final double driveKp = 0.05;
+    public static final double driveKp = 0.005;
     public static final double driveKd = 0.0;
 
-    public static final double driveKs = 0.16681;
-    public static final double driveKv = 2.609;
-    public static final double driveKa = 0.51582;
+    public static final double driveKs = 0.19268;
+    public static final double driveKv = 2.642;
+    public static final double driveKa = 0.55965;
     public static final double driveSimP = 0.01;
     public static final double driveSimD = 0.0;
     public static final double driveSimKs = 0.0;
@@ -181,7 +186,7 @@ public final class Constants {
     public static final int turnMotorCurrentLimit = 60;
     public static final double turnMotorReduction = 12.8;
     // public static final double turnMotorReduction = 9424.0 / 203.0;
-    public static final DCMotor turnGearbox = DCMotor.getNeo550(1);
+    public static final DCMotor turnGearbox = DCMotor.getNEO(1);
 
     // Turn encoder configuration
     // TODO: URGENT, apply the gear reduction

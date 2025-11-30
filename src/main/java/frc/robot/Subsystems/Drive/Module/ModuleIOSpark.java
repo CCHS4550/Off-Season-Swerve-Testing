@@ -55,7 +55,7 @@ public class ModuleIOSpark implements ModuleIO {
 
   // closed loop control for both motors
   private final SparkClosedLoopController driveController;
-  //private final SparkClosedLoopController turnController;
+  // private final SparkClosedLoopController turnController;
 
   private final PIDController turnPID =
       new PIDController(Constants.DriveConstants.turnKp, 0.0, Constants.DriveConstants.turnKd);
@@ -106,6 +106,7 @@ public class ModuleIOSpark implements ModuleIO {
               case 3 -> Constants.DriveConstants.backRightTurnEncoder;
               default -> 0;
             });
+
     absoluteEncoder = new AnalogEncoder(absoluteAnalogInput);
     // use switch statement to declare drive spark with right can ID
     driveSpark =
@@ -120,13 +121,13 @@ public class ModuleIOSpark implements ModuleIO {
             MotorType.kBrushless);
     // declare encoders for both motors
     driveEncoder = driveSpark.getEncoder(); // don't need an absolute encoder for drive
-    //turnEncoder = turnSpark.getAbsoluteEncoder();
+    // turnEncoder = turnSpark.getAbsoluteEncoder();
 
     // declare closed loop control for both motors
     driveController = driveSpark.getClosedLoopController();
-    //turnController = turnSpark.getClosedLoopController();
+    // turnController = turnSpark.getClosedLoopController();
 
-    turnPID.enableContinuousInput(0, Math.PI);
+    turnPID.enableContinuousInput(0, Math.PI * 2);
 
     // turn motor config
     var turnConfig = new SparkMaxConfig();
@@ -313,7 +314,6 @@ public class ModuleIOSpark implements ModuleIO {
                 () ->
                     Rotation2d.fromRotations(absoluteEncoder.get())
                         .minus(rotationOffset)
-                        .plus(Rotation2d.kPi)
                         .getRadians());
   }
 
@@ -332,9 +332,9 @@ public class ModuleIOSpark implements ModuleIO {
 
     // update turn motor values, only accepting if no sticky fault present
     SparkUtil.stickyFault = false;
-    inputs.turnPosition =
-        Rotation2d.fromRotations(absoluteEncoder.get()).minus(rotationOffset).plus(Rotation2d.kPi);
-    inputs.turnVelocityRadPerSec = Rotation2d.fromRotations(turnSpark.getEncoder().getVelocity()).getRadians();
+    inputs.turnPosition = Rotation2d.fromRotations(absoluteEncoder.get()).minus(rotationOffset);
+    inputs.turnVelocityRadPerSec =
+        Rotation2d.fromRotations(turnSpark.getEncoder().getVelocity()).getRadians();
     ifOK(
         turnSpark,
         new DoubleSupplier[] {turnSpark::getAppliedOutput, turnSpark::getBusVoltage},
@@ -386,6 +386,7 @@ public class ModuleIOSpark implements ModuleIO {
    */
   @Override
   public void setDriveVelo(double velo) {
+    System.out.println(velo);
     double ffvolts =
         Constants.DriveConstants.driveKs * Math.signum(velo)
             + Constants.DriveConstants.driveKv * velo;
@@ -403,14 +404,14 @@ public class ModuleIOSpark implements ModuleIO {
   public void setTurnPos(Rotation2d rotation) {
     double setPoint =
         MathUtil.inputModulus(
-            rotation.plus(rotationOffset).getRadians(),
+            rotation.getRadians(),
             Constants.DriveConstants.turnPIDMinInput,
             Constants.DriveConstants.turnPIDMaxInput);
     double volts =
         turnPID.calculate(
-            (Rotation2d.fromRotations(absoluteEncoder.get()).plus(Rotation2d.kPi)).getRadians(),
+            (Rotation2d.fromRotations(absoluteEncoder.get()).minus(rotationOffset)).getRadians(),
             setPoint);
-    System.out.println(volts);
+    // System.out.println(volts);
     setTurnOpenLoop(volts);
   }
 

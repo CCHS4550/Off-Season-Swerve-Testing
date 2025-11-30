@@ -449,21 +449,21 @@ public class Drive extends SubsystemBase implements QuestNav.QuestConsumer {
       // odometry information, coordinated with timestamps
     }
 
-    // systemState = handleStateTransition(); // adjust system state according to the wanted state
+    systemState = handleStateTransition(); // adjust system state according to the wanted state
 
-    // // log states
-    // Logger.recordOutput("Subsystems/Drive/SystemState", systemState);
-    // Logger.recordOutput("Subsystems/Drive/DesiredState", wantedState);
+    // log states
+    Logger.recordOutput("Subsystems/Drive/SystemState", systemState);
+    Logger.recordOutput("Subsystems/Drive/DesiredState", wantedState);
 
-    // // see method comment
-    // isAtDesiredPose = cancelIfNearAndReturnTrue();
+    // see method comment
+    isAtDesiredPose = cancelIfNearAndReturnTrue();
 
-    // // turn the states into desired output
-    // applyStates();
+    // turn the states into desired output
+    applyStates();
 
-    for (int i = 1; i < 4; i++) {
-      modules[i].runCharacterization(2);
-    }
+    // for (int i = 0; i < 4; i++) {
+    //   modules[i].runCharacterization(2);
+    // }
 
     Robotstate.getInstance().updateBotPoseAndSpeeds(getPose(), getChassisSpeeds());
     Robotstate.getInstance().updateRawGyroVelo(gyroInputs.yawVelocityRadPerSec);

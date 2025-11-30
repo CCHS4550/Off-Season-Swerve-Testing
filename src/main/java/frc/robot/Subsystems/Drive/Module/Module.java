@@ -82,7 +82,8 @@ public class Module {
    * @param state the speed(meters/sec) and angle with which to set the swerve module
    */
   public void runSwerveState(SwerveModuleState state) {
-    state.optimize(getAngle()); // reverses the direction so the turn never goes the long way around
+    state.optimize(getAngle()); // reverses the direction so the turn never goes the long way
+    // around
     state.cosineScale(inputs.turnPosition); // smooths out the direction change
 
     // set the motors
@@ -96,9 +97,10 @@ public class Module {
    * @param output volts
    */
   public void runCharacterization(double output) {
-    io.setTurnOpenLoop(output);
-    // io.setTurnPos(Rotation2d.fromDegrees(0));
-    io.setDriveOpenLoop(output);
+    // io.setTurnOpenLoop(output);
+    io.setTurnPos(Rotation2d.fromDegrees(0));
+    // io.setDriveVelo(1);
+    // io.setDriveOpenLoop(output);
   }
 
   /**
