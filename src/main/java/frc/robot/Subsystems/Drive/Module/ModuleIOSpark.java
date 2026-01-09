@@ -386,7 +386,6 @@ public class ModuleIOSpark implements ModuleIO {
    */
   @Override
   public void setDriveVelo(double velo) {
-    System.out.println(velo);
     double ffvolts =
         Constants.DriveConstants.driveKs * Math.signum(velo)
             + Constants.DriveConstants.driveKv * velo;
@@ -411,7 +410,6 @@ public class ModuleIOSpark implements ModuleIO {
         turnPID.calculate(
             (Rotation2d.fromRotations(absoluteEncoder.get()).minus(rotationOffset)).getRadians(),
             setPoint);
-    // System.out.println(volts);
     setTurnOpenLoop(volts);
   }
 

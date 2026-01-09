@@ -60,6 +60,7 @@ public class Module {
     // create a new array of swervemodule positions for the amount of timestamps we have
     int sampleCount = inputs.odometryTimestamps.length;
     odometryPositions = new SwerveModulePosition[sampleCount];
+    System.out.println(sampleCount);
 
     // fill the odometryPositions array with the module information at givern sample
     for (int i = 0; i < sampleCount; i++) {
